@@ -749,6 +749,64 @@
   border-radius: var(--radius);
 }
 
+.viewing-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: #6d6bff14;
+  border: 1px solid #6d6bff33;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.exports-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.exports-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.export-chip {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.export-chip.active {
+  border-color: var(--accent);
+}
+.export-name {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.export-name:hover {
+  background: var(--bg-card-hover);
+}
+.export-dl {
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.export-dl:hover {
+  color: var(--text);
+  background: var(--bg-card-hover);
+}
+
 /* AI chat pane */
 .chat-pane {
   min-height: 0;

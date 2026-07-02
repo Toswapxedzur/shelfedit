@@ -7,6 +7,7 @@ it executes on a separate thread.
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,11 +23,13 @@ from ..models import (
     MediaType,
     Project,
     ProjectStatus,
+    StorageKind,
+    Timeline,
     Transcript,
     TranscriptSegment,
     TranscriptWord,
 )
-from ..services import transcription_service as tx
+from ..services import render_service, transcription_service as tx
 from ..utils import ffmpeg, paths
 
 
@@ -184,3 +187,144 @@ def _persist_transcript(
 def start_transcription_job(job_id: str) -> None:
     """Spawn the transcription worker on a daemon thread."""
     threading.Thread(target=_run_transcription, args=(job_id,), daemon=True).start()
+
+
+def _next_export_path(project_id: str) -> Path:
+    """A fresh, versioned export filename — never overwrites an existing one."""
+    rdir = paths.renders_dir(project_id)
+    rdir.mkdir(parents=True, exist_ok=True)
+    version = 1
+    while (rdir / f"export_v{version}.mp4").exists():
+        version += 1
+    return rdir / f"export_v{version}.mp4"
+
+
+def _run_render(job_id: str) -> None:
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            return
+        project = session.get(Project, job.project_id)
+        if project is None:
+            _update_job(session, job, status=JobStatus.error, error="Project missing")
+            return
+
+        timeline = session.exec(
+            select(Timeline)
+            .where(Timeline.project_id == project.id)
+            .order_by(Timeline.version.desc())  # type: ignore[union-attr]
+        ).first()
+        if timeline is None:
+            _update_job(
+                session, job, status=JobStatus.error, error="No timeline to render"
+            )
+            return
+
+        data = json.loads(timeline.data_json)
+        media_id, segments = render_service.segments_from_timeline(data)
+        if not segments or media_id is None:
+            _update_job(
+                session, job, status=JobStatus.error, error="Timeline has no clips"
+            )
+            return
+
+        source = session.get(MediaAsset, media_id)
+        if source is None or not Path(source.local_path).exists():
+            _update_job(
+                session, job, status=JobStatus.error, error="Source video missing"
+            )
+            return
+
+        prior_status = project.status
+        try:
+            _update_job(
+                session,
+                job,
+                status=JobStatus.running,
+                progress=0.05,
+                message="Preparing render",
+            )
+            project.status = ProjectStatus.rendering
+            session.add(project)
+            session.commit()
+
+            source_path = Path(source.local_path)
+            has_audio = ffmpeg.has_audio_stream(source_path)
+            total = sum(end - start for start, end in segments)
+            output_path = _next_export_path(project.id)
+
+            # Throttle DB writes: only commit when progress moves a bit.
+            last = {"p": 0.0}
+
+            def on_progress(p: float) -> None:
+                scaled = 0.1 + 0.85 * p
+                if scaled - last["p"] >= 0.02:
+                    last["p"] = scaled
+                    _update_job(
+                        session, job, progress=scaled, message="Rendering video"
+                    )
+
+            render_service.render_cut_list(
+                source_path,
+                segments,
+                output_path,
+                total,
+                has_audio=has_audio,
+                on_progress=on_progress,
+            )
+
+            _update_job(session, job, progress=0.96, message="Finalizing export")
+            _persist_export(session, project, output_path)
+
+            project.status = ProjectStatus.rendered
+            project.updated_at = _utcnow()
+            session.add(project)
+            session.commit()
+
+            _update_job(
+                session,
+                job,
+                status=JobStatus.done,
+                progress=1.0,
+                message="Render complete",
+            )
+        except ffmpeg.FFmpegError as e:
+            _restore_status(session, project, prior_status)
+            _update_job(session, job, status=JobStatus.error, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            _restore_status(session, project, prior_status)
+            _update_job(
+                session, job, status=JobStatus.error, error=f"Unexpected error: {e}"
+            )
+
+
+def _restore_status(session: Session, project: Project, status: ProjectStatus) -> None:
+    project.status = status
+    project.updated_at = _utcnow()
+    session.add(project)
+    session.commit()
+
+
+def _persist_export(session: Session, project: Project, output_path: Path) -> MediaAsset:
+    probe = ffmpeg.probe(output_path)
+    asset = MediaAsset(
+        project_id=project.id,
+        type=MediaType.export,
+        storage_kind=StorageKind.copied,
+        original_filename=output_path.name,
+        local_path=str(output_path),
+        relative_path=f"renders/{output_path.name}",
+        duration_seconds=probe.duration_seconds,
+        width=probe.width,
+        height=probe.height,
+        size_bytes=output_path.stat().st_size,
+    )
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    return asset
+
+
+def start_render_job(job_id: str) -> None:
+    """Spawn the render worker on a daemon thread."""
+    threading.Thread(target=_run_render, args=(job_id,), daemon=True).start()

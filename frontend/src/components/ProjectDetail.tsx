@@ -34,6 +34,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const pollRef = useRef<number | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
+  const [exports, setExports] = useState<MediaAsset[]>([])
+  const [renderJob, setRenderJob] = useState<Job | null>(null)
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const [viewingExportId, setViewingExportId] = useState<string | null>(null)
+  const renderPollRef = useRef<number | null>(null)
+
   const load = useCallback(async () => {
     try {
       const [p, m] = await Promise.all([
@@ -47,6 +53,11 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         setTranscript(await api.getTranscript(projectId))
       } catch {
         setTranscript(null)
+      }
+      try {
+        setExports(await api.getExports(projectId))
+      } catch {
+        setExports([])
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project')
@@ -62,6 +73,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   useEffect(() => {
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
+      if (renderPollRef.current) window.clearInterval(renderPollRef.current)
     }
   }, [])
 
@@ -110,6 +122,49 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     }
   }
 
+  const renderBusy =
+    renderJob?.status === 'queued' || renderJob?.status === 'running'
+
+  const pollRenderJob = (jobId: string) => {
+    if (renderPollRef.current) window.clearInterval(renderPollRef.current)
+    renderPollRef.current = window.setInterval(async () => {
+      try {
+        const j = await api.getJob(jobId)
+        setRenderJob(j)
+        if (j.status === 'done' || j.status === 'error') {
+          if (renderPollRef.current) window.clearInterval(renderPollRef.current)
+          renderPollRef.current = null
+          if (j.status === 'error') setRenderError(j.error_message ?? 'Render failed')
+          await load()
+          onChanged()
+          if (j.status === 'done') {
+            // Show the freshest export in the preview.
+            try {
+              const list = await api.getExports(projectId)
+              if (list[0]) setViewingExportId(list[0].id)
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } catch {
+        if (renderPollRef.current) window.clearInterval(renderPollRef.current)
+        renderPollRef.current = null
+      }
+    }, 1000)
+  }
+
+  const startRender = async () => {
+    setRenderError(null)
+    try {
+      const j = await api.render(projectId)
+      setRenderJob(j)
+      pollRenderJob(j.id)
+    } catch (e) {
+      setRenderError(e instanceof Error ? e.message : 'Failed to start render')
+    }
+  }
+
   const handleImported = async () => {
     setShowImport(false)
     await load()
@@ -128,6 +183,11 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   if (!project) return <div className="error-banner">{error ?? 'Not found'}</div>
 
   const canTranscribe = Boolean(video) && !busy
+  const cutsApplied =
+    project.status === 'ai_cut_ready' || project.status === 'rendered'
+  const canRender = cutsApplied && !renderBusy
+  const viewingExport = exports.find((e) => e.id === viewingExportId) ?? null
+  const previewMediaId = viewingExport ? viewingExport.id : video?.id
 
   return (
     <div className="detail editor-detail">
@@ -181,6 +241,30 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           ) : (
             <div className="tool-hint">Select a segment</div>
           )}
+
+          <div className="tool-divider" />
+          <div className="tool-section">
+            <div className="tool-section-title">Export</div>
+            <button
+              className="tool-btn"
+              title={
+                cutsApplied
+                  ? 'Render the applied cut plan to a video'
+                  : 'Apply an AI cut plan first'
+              }
+              onClick={startRender}
+              disabled={!canRender}
+            >
+              <span className="tool-ico">🎬</span>
+              <span className="tool-label">
+                {renderBusy
+                  ? 'Rendering…'
+                  : exports.length
+                    ? 'Re-render'
+                    : 'Render'}
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* Center: preview */}
@@ -188,13 +272,28 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           {video ? (
             <>
               <video
+                key={previewMediaId}
                 ref={videoRef}
                 className="preview-video"
                 controls
-                poster={api.mediaThumbnailUrl(video.id)}
-                src={api.mediaFileUrl(video.id)}
+                poster={viewingExport ? undefined : api.mediaThumbnailUrl(video.id)}
+                src={api.mediaFileUrl(previewMediaId ?? video.id)}
               />
+              {viewingExport && (
+                <div className="viewing-bar">
+                  <span>
+                    Viewing export · {viewingExport.original_filename}
+                  </span>
+                  <button
+                    className="btn small"
+                    onClick={() => setViewingExportId(null)}
+                  >
+                    Back to source
+                  </button>
+                </div>
+              )}
               {txError && <div className="error-banner">{txError}</div>}
+              {renderError && <div className="error-banner">{renderError}</div>}
               {needConfirmLong && (
                 <div className="confirm-box">
                   <div>{needConfirmLong}</div>
@@ -220,6 +319,50 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
                     />
                   </div>
                   <div className="tx-msg">{job?.message ?? 'Working…'}</div>
+                </div>
+              )}
+              {renderBusy && (
+                <div className="tx-progress">
+                  <div className="tx-bar">
+                    <div
+                      className="tx-fill"
+                      style={{
+                        width: `${Math.round((renderJob?.progress ?? 0) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="tx-msg">
+                    {renderJob?.message ?? 'Rendering…'}
+                  </div>
+                </div>
+              )}
+              {exports.length > 0 && (
+                <div className="exports-bar">
+                  <span className="exports-label">Exports</span>
+                  {exports.map((ex) => (
+                    <div
+                      key={ex.id}
+                      className={`export-chip ${
+                        ex.id === viewingExportId ? 'active' : ''
+                      }`}
+                    >
+                      <button
+                        className="export-name"
+                        title="Preview this export"
+                        onClick={() => setViewingExportId(ex.id)}
+                      >
+                        ▶ {ex.original_filename}
+                      </button>
+                      <a
+                        className="export-dl"
+                        href={api.mediaFileUrl(ex.id)}
+                        download={ex.original_filename}
+                        title="Download"
+                      >
+                        ↓
+                      </a>
+                    </div>
+                  ))}
                 </div>
               )}
             </>
