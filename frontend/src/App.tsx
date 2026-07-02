@@ -4,7 +4,7 @@ import { api, type Project } from './api/client'
 import { Sidebar, type View } from './components/Sidebar'
 import { ProjectCard } from './components/ProjectCard'
 import { CreateProjectModal } from './components/CreateProjectModal'
-import { ImportMediaModal } from './components/ImportMediaModal'
+import { ProjectDetail } from './components/ProjectDetail'
 
 export default function App() {
   const [view, setView] = useState<View>('home')
@@ -13,7 +13,7 @@ export default function App() {
   const [online, setOnline] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [importTarget, setImportTarget] = useState<Project | null>(null)
+  const [openProjectId, setOpenProjectId] = useState<string | null>(null)
 
   const refresh = async () => {
     try {
@@ -42,13 +42,8 @@ export default function App() {
     const created = await api.createProject(name)
     setShowCreate(false)
     await refresh()
-    // Flow straight into importing a video for the new project.
-    setImportTarget(created)
-  }
-
-  const handleImported = async () => {
-    setImportTarget(null)
-    await refresh()
+    // Open the new project's edit screen; importing happens there, not forced.
+    setOpenProjectId(created.id)
   }
 
   const handleDelete = async (project: Project) => {
@@ -69,80 +64,95 @@ export default function App() {
       <Sidebar active={view} onSelect={setView} />
 
       <main className="main">
-        <div className="main-header">
-          <div>
-            <h1>
-              {view === 'home'
-                ? 'Your Projects'
-                : view === 'cloud'
-                  ? 'Cloud Storage'
-                  : 'Settings'}
-            </h1>
-            <div className="subtitle">
-              {view === 'home'
-                ? 'Local-first AI video editing. Nothing leaves your machine.'
-                : view === 'cloud'
-                  ? 'Deferred for now — everything stays local.'
-                  : 'Configuration lives in backend/.env for this version.'}
-            </div>
-          </div>
-          <div className="status-pill">
-            <span
-              className={`dot ${online === null ? '' : online ? 'ok' : 'bad'}`}
-            />
-            {online === null
-              ? 'Connecting…'
-              : online
-                ? 'Backend connected'
-                : 'Backend offline'}
-          </div>
-        </div>
-
-        {error && <div className="error-banner">{error}</div>}
-
-        {view === 'home' && (
+        {openProjectId ? (
+          <ProjectDetail
+            projectId={openProjectId}
+            onBack={() => {
+              setOpenProjectId(null)
+              refresh()
+            }}
+            onChanged={refresh}
+          />
+        ) : (
           <>
-            {loading ? (
-              <div className="empty-hint">Loading projects…</div>
-            ) : (
-              <div className="grid">
-                {projects.map((p) => (
-                  <ProjectCard
-                    key={p.id}
-                    project={p}
-                    onDelete={handleDelete}
-                    onImport={setImportTarget}
-                  />
-                ))}
-                <button
-                  className="card create-card"
-                  onClick={() => setShowCreate(true)}
-                >
-                  <span className="plus">+</span>
-                  Start Creation
-                </button>
+            <div className="main-header">
+              <div>
+                <h1>
+                  {view === 'home'
+                    ? 'Your Projects'
+                    : view === 'cloud'
+                      ? 'Cloud Storage'
+                      : 'Settings'}
+                </h1>
+                <div className="subtitle">
+                  {view === 'home'
+                    ? 'Local-first AI video editing. Nothing leaves your machine.'
+                    : view === 'cloud'
+                      ? 'Deferred for now — everything stays local.'
+                      : 'Configuration lives in backend/.env for this version.'}
+                </div>
+              </div>
+              <div className="status-pill">
+                <span
+                  className={`dot ${online === null ? '' : online ? 'ok' : 'bad'}`}
+                />
+                {online === null
+                  ? 'Connecting…'
+                  : online
+                    ? 'Backend connected'
+                    : 'Backend offline'}
+              </div>
+            </div>
+
+            {error && <div className="error-banner">{error}</div>}
+
+            {view === 'home' && (
+              <>
+                {loading ? (
+                  <div className="empty-hint">Loading projects…</div>
+                ) : (
+                  <div className="grid">
+                    {projects.map((p) => (
+                      <ProjectCard
+                        key={p.id}
+                        project={p}
+                        onDelete={handleDelete}
+                        onOpen={(proj) => setOpenProjectId(proj.id)}
+                      />
+                    ))}
+                    <button
+                      className="card create-card"
+                      onClick={() => setShowCreate(true)}
+                    >
+                      <span className="plus">+</span>
+                      Start Creation
+                    </button>
+                  </div>
+                )}
+                {!loading && projects.length === 0 && (
+                  <div className="empty-hint">
+                    No projects yet. Click “Start Creation” to make your first
+                    one.
+                  </div>
+                )}
+              </>
+            )}
+
+            {view === 'cloud' && (
+              <div className="empty-hint">
+                Cloud storage is intentionally deferred. This app is
+                local-first.
               </div>
             )}
-            {!loading && projects.length === 0 && (
+
+            {view === 'settings' && (
               <div className="empty-hint">
-                No projects yet. Click “Start Creation” to make your first one.
+                Settings (OpenAI key, storage folder, import limits) are read
+                from <code>backend/.env</code> in this version. A visual
+                settings page comes later.
               </div>
             )}
           </>
-        )}
-
-        {view === 'cloud' && (
-          <div className="empty-hint">
-            Cloud storage is intentionally deferred. This app is local-first.
-          </div>
-        )}
-
-        {view === 'settings' && (
-          <div className="empty-hint">
-            Settings (OpenAI key, storage folder, import limits) are read from{' '}
-            <code>backend/.env</code> in this version. A visual settings page
-            comes later.
-          </div>
         )}
       </main>
 
@@ -150,14 +160,6 @@ export default function App() {
         <CreateProjectModal
           onCancel={() => setShowCreate(false)}
           onCreate={handleCreate}
-        />
-      )}
-
-      {importTarget && (
-        <ImportMediaModal
-          project={importTarget}
-          onCancel={() => setImportTarget(null)}
-          onImported={handleImported}
         />
       )}
     </div>
