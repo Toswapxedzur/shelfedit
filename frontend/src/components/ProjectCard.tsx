@@ -1,8 +1,15 @@
-import type { Project, ProjectStatus } from '../api/client'
+import {
+  api,
+  formatDuration,
+  formatSize,
+  type Project,
+  type ProjectStatus,
+} from '../api/client'
 
 interface Props {
   project: Project
   onDelete: (project: Project) => void
+  onImport: (project: Project) => void
 }
 
 const STATUS_LABEL: Record<ProjectStatus, { text: string; tone: string }> = {
@@ -32,8 +39,10 @@ function relativeTime(iso: string): string {
   return `${Math.floor(secs / 86400)} d ago`
 }
 
-export function ProjectCard({ project, onDelete }: Props) {
+export function ProjectCard({ project, onDelete, onImport }: Props) {
   const status = STATUS_LABEL[project.status]
+  const hasMedia = project.media_count > 0
+
   return (
     <div className="card">
       <button
@@ -44,12 +53,26 @@ export function ProjectCard({ project, onDelete }: Props) {
         ×
       </button>
       <div className="thumb">
-        {project.thumbnail_path ? '' : 'No preview'}
+        {project.has_thumbnail ? (
+          <img
+            className="thumb-img"
+            src={api.projectThumbnailUrl(project)}
+            alt={project.name}
+          />
+        ) : (
+          <button className="thumb-import" onClick={() => onImport(project)}>
+            + Import video
+          </button>
+        )}
       </div>
       <div className="card-body">
         <h3 className="card-title">{project.name}</h3>
         <div className="card-meta">
-          <div className="row">— | —:—</div>
+          <div className="row">
+            {hasMedia
+              ? `${formatSize(project.size_bytes)} | ${formatDuration(project.duration_seconds)}`
+              : 'No media'}
+          </div>
           <div className="row">
             <span className={`tag ${status.tone}`}>{status.text}</span>
             <span className="tag">

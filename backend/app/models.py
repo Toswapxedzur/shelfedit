@@ -39,6 +39,21 @@ class StorageMode(str, Enum):
     original_missing_local = "original_missing_local"
 
 
+class MediaType(str, Enum):
+    video = "video"
+    image = "image"
+    audio = "audio"
+    proxy = "proxy"
+    export = "export"
+
+
+class StorageKind(str, Enum):
+    """How the app holds the file on disk."""
+
+    copied = "copied"  # copied into the project folder (self-contained)
+    referenced = "referenced"  # left in place; we only store its path
+
+
 class Project(SQLModel, table=True):
     __tablename__ = "projects"
 
@@ -53,3 +68,33 @@ class Project(SQLModel, table=True):
     # Soft-delete marker. The plan forbids destructive deletion in early phases,
     # so DELETE marks this timestamp instead of removing rows or files.
     deleted_at: datetime | None = Field(default=None)
+
+
+class MediaAsset(SQLModel, table=True):
+    __tablename__ = "media_assets"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(index=True, foreign_key="projects.id")
+    type: MediaType = Field(default=MediaType.video)
+
+    # How we hold the file: copied into the project, or referenced in place.
+    storage_kind: StorageKind = Field(default=StorageKind.copied)
+
+    original_filename: str
+    # Absolute path we read the file from (the copy, or the original if referenced).
+    local_path: str
+    # Path relative to the project folder when copied; None when referenced.
+    relative_path: str | None = Field(default=None)
+
+    sha256: str | None = Field(default=None)
+    duration_seconds: float | None = Field(default=None)
+    width: int | None = Field(default=None)
+    height: int | None = Field(default=None)
+    size_bytes: int | None = Field(default=None)
+
+    description: str | None = Field(default=None)
+    tags_json: str | None = Field(default=None)
+
+    thumbnail_path: str | None = Field(default=None)
+
+    created_at: datetime = Field(default_factory=_utcnow)

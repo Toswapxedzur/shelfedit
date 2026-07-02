@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import Project
+from ..models import MediaAsset, MediaType, Project
 from ..schemas import ProjectCreate, ProjectRead, ProjectUpdate
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -31,13 +31,34 @@ def _get_active_project(project_id: str, session: Session) -> Project:
     return project
 
 
+def build_project_read(project: Project, session: Session) -> ProjectRead:
+    """Attach a summary of the project's primary video (duration/size/count)."""
+    assets = session.exec(
+        select(MediaAsset).where(MediaAsset.project_id == project.id)
+    ).all()
+    primary = next((a for a in assets if a.type == MediaType.video), None)
+    return ProjectRead(
+        id=project.id,
+        name=project.name,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        thumbnail_path=project.thumbnail_path,
+        status=project.status,
+        storage_mode=project.storage_mode,
+        media_count=len(assets),
+        duration_seconds=primary.duration_seconds if primary else None,
+        size_bytes=primary.size_bytes if primary else None,
+        has_thumbnail=bool(project.thumbnail_path),
+    )
+
+
 @router.post("", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, session: Session = Depends(get_session)):
     project = Project(name=payload.name, storage_mode=payload.storage_mode)
     session.add(project)
     session.commit()
     session.refresh(project)
-    return project
+    return build_project_read(project, session)
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -47,12 +68,14 @@ def list_projects(session: Session = Depends(get_session)):
         .where(Project.deleted_at.is_(None))  # type: ignore[union-attr]
         .order_by(Project.created_at.desc())  # type: ignore[union-attr]
     )
-    return session.exec(statement).all()
+    projects = session.exec(statement).all()
+    return [build_project_read(p, session) for p in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project(project_id: str, session: Session = Depends(get_session)):
-    return _get_active_project(project_id, session)
+    project = _get_active_project(project_id, session)
+    return build_project_read(project, session)
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)
@@ -69,7 +92,7 @@ def update_project(
     session.add(project)
     session.commit()
     session.refresh(project)
-    return project
+    return build_project_read(project, session)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_200_OK)

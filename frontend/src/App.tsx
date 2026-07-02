@@ -4,6 +4,7 @@ import { api, type Project } from './api/client'
 import { Sidebar, type View } from './components/Sidebar'
 import { ProjectCard } from './components/ProjectCard'
 import { CreateProjectModal } from './components/CreateProjectModal'
+import { ImportMediaModal } from './components/ImportMediaModal'
 
 export default function App() {
   const [view, setView] = useState<View>('home')
@@ -12,6 +13,7 @@ export default function App() {
   const [online, setOnline] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [importTarget, setImportTarget] = useState<Project | null>(null)
 
   const refresh = async () => {
     try {
@@ -37,8 +39,15 @@ export default function App() {
   }, [])
 
   const handleCreate = async (name: string) => {
-    await api.createProject(name)
+    const created = await api.createProject(name)
     setShowCreate(false)
+    await refresh()
+    // Flow straight into importing a video for the new project.
+    setImportTarget(created)
+  }
+
+  const handleImported = async () => {
+    setImportTarget(null)
     await refresh()
   }
 
@@ -98,7 +107,12 @@ export default function App() {
             ) : (
               <div className="grid">
                 {projects.map((p) => (
-                  <ProjectCard key={p.id} project={p} onDelete={handleDelete} />
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    onDelete={handleDelete}
+                    onImport={setImportTarget}
+                  />
                 ))}
                 <button
                   className="card create-card"
@@ -136,6 +150,14 @@ export default function App() {
         <CreateProjectModal
           onCancel={() => setShowCreate(false)}
           onCreate={handleCreate}
+        />
+      )}
+
+      {importTarget && (
+        <ImportMediaModal
+          project={importTarget}
+          onCancel={() => setImportTarget(null)}
+          onImported={handleImported}
         />
       )}
     </div>
