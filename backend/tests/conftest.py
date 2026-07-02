@@ -37,6 +37,15 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
     importlib.reload(media_router)
 
+    # Job runner binds the DB engine at import time, so reload it after database.
+    import app.workers.job_runner as job_runner
+
+    importlib.reload(job_runner)
+
+    import app.routers.transcript as transcript_router
+
+    importlib.reload(transcript_router)
+
     import app.main as main
 
     importlib.reload(main)

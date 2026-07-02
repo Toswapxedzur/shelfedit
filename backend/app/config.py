@@ -51,6 +51,17 @@ class Settings:
         self.openai_cut_model: str = os.getenv("OPENAI_CUT_MODEL", "gpt-4o")
         self.max_import_file_gb: float = float(os.getenv("MAX_IMPORT_FILE_GB", "30"))
 
+        # Warn/confirm before transcribing very long audio (cost + time guard).
+        self.transcribe_warn_minutes: float = float(
+            os.getenv("TRANSCRIBE_WARN_MINUTES", "120")
+        )
+
+        # Dev/test aid: when true, transcription returns a canned result instead
+        # of calling OpenAI. Off by default — real OpenAI is used normally.
+        self.fake_transcribe: bool = os.getenv(
+            "SHELFEDIT_FAKE_TRANSCRIBE", ""
+        ).strip().lower() in ("1", "true", "yes")
+
         # CORS origins for the desktop/web client during local development.
         raw_origins = os.getenv(
             "CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
