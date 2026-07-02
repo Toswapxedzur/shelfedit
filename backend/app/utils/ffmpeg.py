@@ -122,6 +122,89 @@ def extract_audio(src: Path, dest: Path) -> Path:
     return dest
 
 
+def generate_filmstrip(
+    src: Path,
+    dest: Path,
+    *,
+    duration: float,
+    count: int = 12,
+    frame_height: int = 90,
+) -> Path:
+    """Tile `count` evenly-spaced frames into a single horizontal strip image.
+
+    Used as the background of a video clip in the timeline. Read-only.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise FFmpegError("ffmpeg not found on PATH")
+    if duration <= 0:
+        raise FFmpegError("cannot build filmstrip without a positive duration")
+
+    count = max(1, min(count, 60))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # fps = count/duration samples ~count frames across the whole clip.
+    fps = count / duration
+    vf = f"fps={fps:.6f},scale=-1:{frame_height},tile={count}x1"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-vf",
+        vf,
+        "-frames:v",
+        "1",
+        str(dest),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not dest.exists():
+        raise FFmpegError(f"filmstrip generation failed: {proc.stderr.strip()}")
+    return dest
+
+
+def extract_waveform_peaks(src: Path, buckets: int = 400) -> list[float]:
+    """Return normalized (0..1) audio amplitude peaks for waveform drawing.
+
+    Decodes mono PCM at a low sample rate and reduces it to `buckets` peak
+    values. Returns an empty list if the file has no audio.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise FFmpegError("ffmpeg not found on PATH")
+    if not has_audio_stream(src):
+        return []
+
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(src),
+        "-ac",
+        "1",
+        "-ar",
+        "8000",
+        "-f",
+        "s16le",
+        "-",
+    ]
+    proc = subprocess.run(cmd, capture_output=True)
+    if proc.returncode != 0:
+        raise FFmpegError(f"waveform decode failed: {proc.stderr.decode()[-300:]}")
+
+    import array
+
+    samples = array.array("h")
+    samples.frombytes(proc.stdout)
+    if len(samples) == 0:
+        return []
+
+    buckets = max(1, min(buckets, 2000))
+    step = max(1, len(samples) // buckets)
+    peaks: list[float] = []
+    for i in range(0, len(samples), step):
+        window = samples[i : i + step]
+        peak = max((abs(s) for s in window), default=0)
+        peaks.append(round(peak / 32768.0, 4))
+    return peaks[:buckets]
+
+
 def generate_thumbnail(
     src: Path, dest: Path, at_seconds: float = 1.0, width: int = 640
 ) -> Path:

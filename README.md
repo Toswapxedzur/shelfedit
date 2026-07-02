@@ -5,12 +5,17 @@ transcribe the audio, let an AI propose which sections to keep vs. cut, review
 the plan, and render the final video locally. Your original footage always stays
 on your machine and is never modified.
 
-> **Status: end-to-end MVP — import → transcribe → AI cut → render.**
+> **Status: end-to-end MVP + a real multi-track timeline editor.**
 > Project management, a desktop app (native window + React editor), video import
-> (copy or reference), in-app playback, OpenAI transcription, an AI edit chat that
-> proposes reviewable cut plans, and **local FFmpeg rendering to a versioned MP4
-> export** all work. Simple overlays are the next phase. An online server is
-> deferred and out of scope.
+> (copy or reference), OpenAI transcription, an AI edit chat that proposes
+> reviewable cut plans, and **local FFmpeg rendering to a versioned MP4 export**
+> all work. The editor is now a **full-screen, 剪映/Movavi-style timeline**: typed
+> video/audio/text tracks, draggable/trim/split/delete clips with undo/redo, and a
+> **real-time canvas compositor** that computes the current frame from the tracks
+> (video + live text overlays), instead of just playing a file. Advanced effects
+> (color grading, transitions, keyframes, masking, green screen, advanced audio
+> mixing, motion tracking) build on this compositor and are the next phase. An
+> online server is deferred and out of scope.
 
 ## Architecture (north star)
 
@@ -101,7 +106,10 @@ pytest -q
 | GET    | `/api/projects/{id}/ai/messages`           | AI edit conversation history                |
 | POST   | `/api/projects/{id}/ai/messages`           | Send a message; get the assistant's reply   |
 | POST   | `/api/projects/{id}/ai/messages/{mid}/apply` | Apply a proposed change to the timeline   |
-| GET    | `/api/projects/{id}/timeline`              | Get the current (versioned) timeline        |
+| GET    | `/api/projects/{id}/timeline`              | Get the working timeline (creates an empty default) |
+| PUT    | `/api/projects/{id}/timeline`              | Save the working timeline (editor autosave) |
+| GET    | `/api/media/{media_id}/filmstrip`          | Tiled frame strip for a clip background     |
+| GET    | `/api/media/{media_id}/waveform`           | Normalized audio peaks for waveform drawing |
 | POST   | `/api/projects/{id}/render`                | Render the applied timeline to an MP4        |
 | GET    | `/api/projects/{id}/exports`               | List rendered export videos                 |
 | GET    | `/api/media/{media_id}/file`               | Stream an export (or source) for playback   |
@@ -127,11 +135,35 @@ pytest -q
 - Offline/dev mode: set `SHELFEDIT_FAKE_TRANSCRIBE=1` to exercise the whole
   workflow with a canned transcript and no API key or cost.
 
+## Timeline editor
+
+- Opening a project takes over the whole window (**full-screen, edge-to-edge**):
+  a top action bar, the **real-time preview** center, the **AI edit chat** on the
+  right, and the **timeline** across the bottom.
+- **Typed tracks** — video, audio, and text. Each track holds one kind of clip;
+  tracks can be combined freely (the default background is black when no video
+  clip is under the playhead).
+- **Real-time compositor** — instead of playing a single file, the preview is a
+  canvas that computes the current frame from the timeline at the playhead: it
+  seeks the active video clip's source, applies its color grade, and paints live
+  text overlays on top. Play/pause/scrub all drive the same engine, and the
+  render uses the same timeline data.
+- **Clip operations** — select, move (drag), trim (edge-drag), split at the
+  playhead, and delete, all with **undo/redo** and debounced autosave. A track
+  toolbar exposes split / delete / undo / redo / zoom.
+- **Clip visuals** — video clips show a **filmstrip** of frames and a label with
+  filename + duration; audio clips show an amplitude **waveform**; text clips
+  show their caption. Time ruler, a draggable playhead, horizontal scroll, and
+  zoom round it out.
+- Importing a video auto-populates the timeline (a video clip plus its audio),
+  and transcription drops the captions onto the text track as subtitle blocks.
+- **Starter effect** — a per-clip color grade (brightness / contrast /
+  saturation) proves the effects pipeline; the clip data model reserves room for
+  the advanced effects listed in the roadmap.
+
 ## AI edit (cut planning)
 
-- The editor screen is arranged like a real editor: a thin tools panel on the
-  left, the video preview in the center, the **AI edit chat** on the right, and a
-  **tracks strip** across the bottom (video, bonded audio, and transcript text).
+- The **AI edit chat** is pinned to the right of the editor, next to the preview.
 - **Transcription is an action on the selected video segment.** It attaches the
   transcript to that segment as **bonded text** shown on the tracks; clicking a
   caption seeks the preview.
@@ -147,23 +179,24 @@ pytest -q
 
 ## Render & export
 
-- Once a cut plan is applied (a timeline exists), use **Render** in the editor's
-  tools panel. It runs a background FFmpeg job with live progress.
+- Use **Render** in the editor's top action bar. It runs a background FFmpeg job
+  with live progress and renders the video track of the current timeline.
 - Rendering trims the kept segments and concatenates them in one re-encode pass,
   keeping audio in sync. The source file is only read, never modified.
 - Exports are written to versioned filenames (`export_v1.mp4`, `export_v2.mp4`,
   …) so a render never overwrites a previous one.
-- Finished exports appear in an **Exports** bar under the preview: click to play
-  the result in-app, or use the download link. The project status becomes
-  `rendered`.
+- Finished exports appear as download links in the top action bar. The project
+  status becomes `rendered`.
 
 ## Roadmap (next)
 
-1. **Simple overlays** — manual text / image / small-video overlays baked into
-   the render (Phase 7 of the plan).
-2. **Multi-track timeline editing** — full drag/trim/split editing on the tracks
-   strip, plus the bonded-element model. Designed in
-   [`docs/timeline-design.md`](docs/timeline-design.md).
+1. **Advanced effects** on top of the compositor — transitions (crossfades),
+   keyframe animation, masking, green screen (chroma key), advanced audio mixing,
+   and eventually motion tracking. The per-clip color grade already in place is
+   the first of these.
+2. **Burn effects into the render** — extend the FFmpeg pipeline so text
+   overlays, color grades, and effects appear in the exported MP4, not just the
+   live preview.
 3. **Asset descriptions** and, much later, an optional online sync layer.
 
 ## Safety guarantees

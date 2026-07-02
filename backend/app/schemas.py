@@ -142,6 +142,10 @@ class TimelineRead(BaseModel):
     created_at: datetime
 
 
+class TimelineSave(BaseModel):
+    data: dict[str, Any]
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     app: str

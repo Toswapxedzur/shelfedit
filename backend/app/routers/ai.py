@@ -193,21 +193,3 @@ def apply_change(
         data=json.loads(timeline.data_json),
         created_at=timeline.created_at,
     )
-
-
-@router.get("/api/projects/{project_id}/timeline", response_model=TimelineRead)
-def get_timeline(project_id: str, session: Session = Depends(get_session)):
-    _get_active_project(project_id, session)
-    timeline = session.exec(
-        select(Timeline)
-        .where(Timeline.project_id == project_id)
-        .order_by(Timeline.version.desc())  # type: ignore[union-attr]
-    ).first()
-    if timeline is None:
-        raise HTTPException(status_code=404, detail="No timeline yet")
-    return TimelineRead(
-        id=timeline.id,
-        version=timeline.version,
-        data=json.loads(timeline.data_json),
-        created_at=timeline.created_at,
-    )
