@@ -5,11 +5,11 @@ transcribe the audio, let an AI propose which sections to keep vs. cut, review
 the plan, and render the final video locally. Your original footage always stays
 on your machine and is never modified.
 
-> **Status: desktop app + media import.** Project management, a desktop app
-> (native window + React home screen), and video import (copy or reference,
-> with thumbnails and duration/size probing) all work. Transcription, AI
-> cutting, and rendering are future phases. An online server is deferred and
-> out of scope.
+> **Status: desktop app + import + transcription.** Project management, a
+> desktop app (native window + React edit screen), video import (copy or
+> reference), in-app playback, and OpenAI transcription (with a timestamped
+> transcript view) all work. AI cutting and rendering are future phases. An
+> online server is deferred and out of scope.
 
 ## Architecture (north star)
 
@@ -93,6 +93,10 @@ pytest -q
 | GET    | `/api/projects/{id}/media`                 | List a project's media                      |
 | GET    | `/api/projects/{id}/thumbnail`             | Project thumbnail image                     |
 | GET    | `/api/media/{media_id}/thumbnail`          | Media thumbnail image                       |
+| GET    | `/api/media/{media_id}/file`               | Stream the video for preview                |
+| POST   | `/api/projects/{id}/transcribe`            | Start a transcription job                   |
+| GET    | `/api/jobs/{job_id}`                       | Poll a background job's status              |
+| GET    | `/api/projects/{id}/transcript`            | Get the transcript (with segments)          |
 
 ## Media import
 
@@ -103,11 +107,24 @@ pytest -q
 - On import the app probes duration/dimensions and generates a thumbnail.
 - Files over `MAX_IMPORT_FILE_GB` (default 30) require explicit confirmation.
 
+## Transcription
+
+- Set `OPENAI_API_KEY` in `backend/.env`, then use the **Transcribe** action on a
+  project's edit screen. The audio is extracted locally and sent to OpenAI; the
+  key never leaves the backend.
+- Runs as a background job with live progress; the transcript shows timestamped
+  segments.
+- Very long videos (over `TRANSCRIBE_WARN_MINUTES`, default 120) ask for
+  confirmation first, since transcription takes time and costs money.
+- Offline/dev mode: set `SHELFEDIT_FAKE_TRANSCRIBE=1` to exercise the whole
+  workflow with a canned transcript and no API key or cost.
+
 ## Safety guarantees
 
 - Original video files are never modified or deleted by the app.
 - `DELETE` is a soft-delete: it marks the record, removes no files.
 - Secrets live only in `backend/.env`, which is git-ignored.
+- Transcription and other long tasks run in the background; the UI polls status.
 
 See `docs/stop-points.md` for the checkpoints where the app pauses for your
 confirmation before doing anything risky.

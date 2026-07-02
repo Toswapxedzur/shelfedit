@@ -461,6 +461,95 @@
   margin-bottom: 6px;
 }
 
+.detail-main {
+  min-width: 0;
+}
+
+/* Transcript panel */
+.transcript-panel {
+  margin-top: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+.transcript-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.transcript-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.segments {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.segment {
+  display: flex;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.seg-time {
+  flex-shrink: 0;
+  width: 52px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  padding-top: 2px;
+}
+.seg-text {
+  color: var(--text);
+}
+
+.tx-progress {
+  padding: 8px 0;
+}
+.tx-bar {
+  height: 8px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.tx-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #a06bff);
+  transition: width 0.4s ease;
+}
+.tx-msg {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.confirm-box {
+  background: #e0b34118;
+  border: 1px solid #e0b34155;
+  color: #f2d999;
+  padding: 12px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.wf-step.soon .btn,
+.wf-step .btn:disabled {
+  opacity: 0.5;
+}
+
 .workflow {
   background: var(--bg-card);
   border: 1px solid var(--border);

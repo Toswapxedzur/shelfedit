@@ -10,7 +10,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import MediaType, ProjectStatus, StorageKind, StorageMode
+from .models import (
+    JobKind,
+    JobStatus,
+    MediaType,
+    ProjectStatus,
+    StorageKind,
+    StorageMode,
+)
 
 
 class ProjectCreate(BaseModel):
@@ -71,6 +78,44 @@ class MediaRead(BaseModel):
     size_bytes: int | None
     description: str | None
     created_at: datetime
+
+
+class TranscribeRequest(BaseModel):
+    # Proceed past the long-audio cost/time warning.
+    confirm_long: bool = False
+
+
+class JobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    kind: JobKind
+    status: JobStatus
+    progress: float
+    message: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SegmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    idx: int
+    start_seconds: float
+    end_seconds: float
+    text: str
+
+
+class TranscriptRead(BaseModel):
+    id: str
+    language: str | None
+    provider: str
+    model: str
+    plain_text: str
+    created_at: datetime
+    segments: list[SegmentRead] = []
 
 
 class HealthResponse(BaseModel):
