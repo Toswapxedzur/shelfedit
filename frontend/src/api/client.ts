@@ -103,22 +103,38 @@ export interface AiMessage {
   created_at: string
 }
 
+export interface ColorGrade {
+  brightness: number // 1 = normal
+  contrast: number // 1 = normal
+  saturation: number // 1 = normal
+}
+
 export interface TimelineElement {
   id: string
-  type: string
+  type: 'video' | 'audio' | 'text'
   media_id?: string
+  // Source in/out for media clips (seconds within the source file).
   source_start?: number
   source_end?: number
+  // Placement on the timeline (seconds).
   timeline_start: number
   timeline_end?: number
+  // Text clip payload.
   text?: string
+  // Per-clip effects (starter set; more added later).
+  color?: ColorGrade
 }
+
+export type TrackKind = 'video' | 'audio' | 'text'
 
 export interface TimelineTrack {
   id: string
-  kind: 'video' | 'audio' | 'text'
+  kind: TrackKind
+  name: string
   order: number
   elements: TimelineElement[]
+  muted?: boolean
+  volume?: number // 0..1, audio/video tracks
 }
 
 export interface TimelineData {
@@ -226,10 +242,18 @@ export const api = {
     ),
   getTimeline: (projectId: string) =>
     request<Timeline>(`/api/projects/${projectId}/timeline`),
+  saveTimeline: (projectId: string, data: TimelineData) =>
+    request<Timeline>(`/api/projects/${projectId}/timeline`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    }),
+  getWaveform: (mediaId: string) =>
+    request<{ peaks: number[] }>(`/api/media/${mediaId}/waveform`),
   render: (projectId: string) =>
     request<Job>(`/api/projects/${projectId}/render`, { method: 'POST' }),
   getExports: (projectId: string) =>
     request<MediaAsset[]>(`/api/projects/${projectId}/exports`),
+  mediaFilmstripUrl: (mediaId: string) => `/api/media/${mediaId}/filmstrip`,
 }
 
 export function formatDuration(seconds: number | null): string {

@@ -1,0 +1,267 @@
+// Pure timeline helpers + immutable edit operations.
+// Every operation returns a new TimelineData with the duration recomputed.
+
+import type {
+  ColorGrade,
+  TimelineData,
+  TimelineElement,
+  TimelineTrack,
+} from '../api/client'
+
+export const MIN_CLIP = 0.1 // seconds
+export const DEFAULT_TEXT_DUR = 3
+
+export const NEUTRAL_COLOR: ColorGrade = {
+  brightness: 1,
+  contrast: 1,
+  saturation: 1,
+}
+
+export function clipDuration(el: TimelineElement): number {
+  if (el.type === 'text') {
+    const end = el.timeline_end ?? el.timeline_start + DEFAULT_TEXT_DUR
+    return Math.max(MIN_CLIP, end - el.timeline_start)
+  }
+  return Math.max(MIN_CLIP, (el.source_end ?? 0) - (el.source_start ?? 0))
+}
+
+export function clipEnd(el: TimelineElement): number {
+  return el.timeline_start + clipDuration(el)
+}
+
+export function computeDuration(data: TimelineData): number {
+  let max = 0
+  for (const t of data.tracks) {
+    for (const el of t.elements) max = Math.max(max, clipEnd(el))
+  }
+  return max
+}
+
+function clone(data: TimelineData): TimelineData {
+  return JSON.parse(JSON.stringify(data))
+}
+
+function withDuration(data: TimelineData): TimelineData {
+  data.duration = computeDuration(data)
+  return data
+}
+
+export function findClip(
+  data: TimelineData,
+  clipId: string,
+): { track: TimelineTrack; el: TimelineElement } | null {
+  for (const track of data.tracks) {
+    const el = track.elements.find((e) => e.id === clipId)
+    if (el) return { track, el }
+  }
+  return null
+}
+
+function newId(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`
+}
+
+// The clip currently under `time` on a given track (or null).
+export function clipAt(track: TimelineTrack, time: number): TimelineElement | null {
+  for (const el of track.elements) {
+    if (time >= el.timeline_start && time < clipEnd(el)) return el
+  }
+  return null
+}
+
+export function moveClip(
+  data: TimelineData,
+  clipId: string,
+  newStart: number,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  const start = Math.max(0, newStart)
+  const delta = start - found.el.timeline_start
+  found.el.timeline_start = start
+  if (found.el.type === 'text' && found.el.timeline_end != null) {
+    found.el.timeline_end += delta
+  }
+  return withDuration(next)
+}
+
+export function trimStart(
+  data: TimelineData,
+  clipId: string,
+  newStart: number,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  const el = found.el
+  const start = Math.max(0, newStart)
+
+  if (el.type === 'text') {
+    const end = el.timeline_end ?? el.timeline_start + DEFAULT_TEXT_DUR
+    el.timeline_start = Math.min(start, end - MIN_CLIP)
+    return withDuration(next)
+  }
+
+  const delta = start - el.timeline_start
+  const srcStart = (el.source_start ?? 0) + delta
+  const clampedSrcStart = Math.max(
+    0,
+    Math.min(srcStart, (el.source_end ?? 0) - MIN_CLIP),
+  )
+  const actualDelta = clampedSrcStart - (el.source_start ?? 0)
+  el.source_start = clampedSrcStart
+  el.timeline_start = el.timeline_start + actualDelta
+  return withDuration(next)
+}
+
+export function trimEnd(
+  data: TimelineData,
+  clipId: string,
+  newEnd: number,
+  sourceMax?: number,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  const el = found.el
+
+  if (el.type === 'text') {
+    el.timeline_end = Math.max(el.timeline_start + MIN_CLIP, newEnd)
+    return withDuration(next)
+  }
+
+  const desiredDur = Math.max(MIN_CLIP, newEnd - el.timeline_start)
+  let srcEnd = (el.source_start ?? 0) + desiredDur
+  if (sourceMax != null) srcEnd = Math.min(srcEnd, sourceMax)
+  el.source_end = Math.max((el.source_start ?? 0) + MIN_CLIP, srcEnd)
+  return withDuration(next)
+}
+
+export function splitClip(
+  data: TimelineData,
+  clipId: string,
+  atTime: number,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  const { track, el } = found
+  const offset = atTime - el.timeline_start
+  if (offset <= MIN_CLIP || offset >= clipDuration(el) - MIN_CLIP) return data
+
+  // `right` is a copy of the original clip (keeps its original end).
+  const right: TimelineElement = JSON.parse(JSON.stringify(el))
+  right.id = newId('clip')
+  right.timeline_start = atTime
+
+  if (el.type === 'text') {
+    // Left half now ends at the split; right half keeps the original end.
+    el.timeline_end = atTime
+  } else {
+    const splitSrc = (el.source_start ?? 0) + offset
+    right.source_start = splitSrc
+    el.source_end = splitSrc
+  }
+
+  const idx = track.elements.findIndex((e) => e.id === clipId)
+  track.elements.splice(idx + 1, 0, right)
+  return withDuration(next)
+}
+
+export function deleteClip(data: TimelineData, clipId: string): TimelineData {
+  const next = clone(data)
+  for (const track of next.tracks) {
+    track.elements = track.elements.filter((e) => e.id !== clipId)
+  }
+  return withDuration(next)
+}
+
+export function addClip(
+  data: TimelineData,
+  trackId: string,
+  el: TimelineElement,
+): TimelineData {
+  const next = clone(data)
+  const track = next.tracks.find((t) => t.id === trackId)
+  if (!track) return data
+  track.elements.push(el)
+  track.elements.sort((a, b) => a.timeline_start - b.timeline_start)
+  return withDuration(next)
+}
+
+export function setClipColor(
+  data: TimelineData,
+  clipId: string,
+  color: ColorGrade,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  found.el.color = color
+  return next
+}
+
+export function setClipText(
+  data: TimelineData,
+  clipId: string,
+  text: string,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  found.el.text = text
+  return next
+}
+
+export function setTrackMuted(
+  data: TimelineData,
+  trackId: string,
+  muted: boolean,
+): TimelineData {
+  const next = clone(data)
+  const track = next.tracks.find((t) => t.id === trackId)
+  if (track) track.muted = muted
+  return next
+}
+
+export function makeVideoClip(
+  mediaId: string,
+  duration: number,
+  timelineStart = 0,
+): TimelineElement {
+  return {
+    id: newId('clip'),
+    type: 'video',
+    media_id: mediaId,
+    source_start: 0,
+    source_end: duration,
+    timeline_start: timelineStart,
+    color: { ...NEUTRAL_COLOR },
+  }
+}
+
+export function makeAudioClip(
+  mediaId: string,
+  duration: number,
+  timelineStart = 0,
+): TimelineElement {
+  return {
+    id: newId('clip'),
+    type: 'audio',
+    media_id: mediaId,
+    source_start: 0,
+    source_end: duration,
+    timeline_start: timelineStart,
+  }
+}
+
+export function makeTextClip(text: string, timelineStart: number): TimelineElement {
+  return {
+    id: newId('clip'),
+    type: 'text',
+    text,
+    timeline_start: timelineStart,
+    timeline_end: timelineStart + DEFAULT_TEXT_DUR,
+  }
+}

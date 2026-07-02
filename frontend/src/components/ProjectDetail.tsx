@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
   ConfirmationRequiredError,
   formatDuration,
   formatSize,
+  type ColorGrade,
   type Job,
   type MediaAsset,
   type Project,
@@ -11,7 +12,17 @@ import {
 } from '../api/client'
 import { ImportMediaModal } from './ImportMediaModal'
 import { AiChat } from './AiChat'
-import { Tracks } from './Tracks'
+import { PreviewCanvas } from '../editor/PreviewCanvas'
+import { TimelineView } from '../editor/TimelineView'
+import { useEditor } from '../editor/useEditor'
+import {
+  addClip,
+  makeAudioClip,
+  makeTextClip,
+  makeVideoClip,
+  NEUTRAL_COLOR,
+  setClipColor,
+} from '../editor/timeline'
 
 interface Props {
   projectId: string
@@ -25,20 +36,20 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
-  const [selected, setSelected] = useState<'video' | null>(null)
 
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [txError, setTxError] = useState<string | null>(null)
   const [needConfirmLong, setNeedConfirmLong] = useState<string | null>(null)
   const pollRef = useRef<number | null>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
 
-  const [exports, setExports] = useState<MediaAsset[]>([])
   const [renderJob, setRenderJob] = useState<Job | null>(null)
   const [renderError, setRenderError] = useState<string | null>(null)
-  const [viewingExportId, setViewingExportId] = useState<string | null>(null)
+  const [exportsList, setExportsList] = useState<MediaAsset[]>([])
   const renderPollRef = useRef<number | null>(null)
+
+  const editor = useEditor(projectId)
+  const populatedText = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -55,9 +66,9 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         setTranscript(null)
       }
       try {
-        setExports(await api.getExports(projectId))
+        setExportsList(await api.getExports(projectId))
       } catch {
-        setExports([])
+        setExportsList([])
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project')
@@ -77,14 +88,50 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     }
   }, [])
 
+  const mediaById = useMemo(
+    () => new Map(media.map((m) => [m.id, m])),
+    [media],
+  )
   const video = media.find((m) => m.type === 'video')
 
-  // Auto-select the video segment once it exists.
+  // Auto-populate the timeline with the imported video (+ its audio).
   useEffect(() => {
-    if (video && selected === null) setSelected('video')
-  }, [video, selected])
+    if (!editor.data || !video) return
+    const vt = editor.data.tracks.find((t) => t.kind === 'video')
+    const at = editor.data.tracks.find((t) => t.kind === 'audio')
+    if (!vt) return
+    const hasClip = vt.elements.some((e) => e.media_id === video.id)
+    if (hasClip) return
+    const dur = video.duration_seconds ?? 0
+    editor.commit((d) => {
+      let nd = addClip(d, vt.id, makeVideoClip(video.id, dur, 0))
+      if (at) nd = addClip(nd, at.id, makeAudioClip(video.id, dur, 0))
+      return nd
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.data, video])
+
+  // Populate the text track from the transcript once.
+  useEffect(() => {
+    if (!editor.data || !transcript || populatedText.current) return
+    const tt = editor.data.tracks.find((t) => t.kind === 'text')
+    if (!tt || tt.elements.length > 0 || transcript.segments.length === 0) return
+    populatedText.current = true
+    editor.commit((d) => {
+      let nd = d
+      for (const s of transcript.segments) {
+        const clip = makeTextClip(s.text, s.start_seconds)
+        clip.timeline_end = s.end_seconds
+        nd = addClip(nd, tt.id, clip)
+      }
+      return nd
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.data, transcript])
 
   const busy = job?.status === 'queued' || job?.status === 'running'
+  const renderBusy =
+    renderJob?.status === 'queued' || renderJob?.status === 'running'
 
   const pollJob = (jobId: string) => {
     if (pollRef.current) window.clearInterval(pollRef.current)
@@ -114,16 +161,10 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
       setJob(j)
       pollJob(j.id)
     } catch (e) {
-      if (e instanceof ConfirmationRequiredError) {
-        setNeedConfirmLong(e.message)
-      } else {
-        setTxError(e instanceof Error ? e.message : 'Failed to start transcription')
-      }
+      if (e instanceof ConfirmationRequiredError) setNeedConfirmLong(e.message)
+      else setTxError(e instanceof Error ? e.message : 'Failed to transcribe')
     }
   }
-
-  const renderBusy =
-    renderJob?.status === 'queued' || renderJob?.status === 'running'
 
   const pollRenderJob = (jobId: string) => {
     if (renderPollRef.current) window.clearInterval(renderPollRef.current)
@@ -134,18 +175,10 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         if (j.status === 'done' || j.status === 'error') {
           if (renderPollRef.current) window.clearInterval(renderPollRef.current)
           renderPollRef.current = null
-          if (j.status === 'error') setRenderError(j.error_message ?? 'Render failed')
+          if (j.status === 'error')
+            setRenderError(j.error_message ?? 'Render failed')
           await load()
           onChanged()
-          if (j.status === 'done') {
-            // Show the freshest export in the preview.
-            try {
-              const list = await api.getExports(projectId)
-              if (list[0]) setViewingExportId(list[0].id)
-            } catch {
-              /* ignore */
-            }
-          }
         }
       } catch {
         if (renderPollRef.current) window.clearInterval(renderPollRef.current)
@@ -161,7 +194,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
       setRenderJob(j)
       pollRenderJob(j.id)
     } catch (e) {
-      setRenderError(e instanceof Error ? e.message : 'Failed to start render')
+      setRenderError(e instanceof Error ? e.message : 'Failed to render')
     }
   }
 
@@ -171,236 +204,197 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     onChanged()
   }
 
-  const seek = (t: number) => {
-    const el = videoRef.current
-    if (el) {
-      el.currentTime = t
-      void el.play().catch(() => {})
+  // Keyboard shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      if (e.key === ' ') {
+        e.preventDefault()
+        editor.setPlaying(!editor.playing)
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && editor.selectedId) {
+        e.preventDefault()
+        editor.commit((d) => {
+          const clone = JSON.parse(JSON.stringify(d))
+          for (const t of clone.tracks)
+            t.elements = t.elements.filter(
+              (x: { id: string }) => x.id !== editor.selectedId,
+            )
+          return clone
+        })
+        editor.setSelectedId(null)
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) editor.redo()
+        else editor.undo()
+      }
     }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editor])
+
+  const selectedClip = editor.selectedId
+    ? editor.data?.tracks
+        .flatMap((t) => t.elements)
+        .find((e) => e.id === editor.selectedId)
+    : undefined
+
+  const setColor = (patch: Partial<ColorGrade>) => {
+    if (!editor.selectedId) return
+    const base = selectedClip?.color ?? NEUTRAL_COLOR
+    editor.commit((d) =>
+      setClipColor(d, editor.selectedId as string, { ...base, ...patch }),
+    )
   }
 
-  if (loading) return <div className="empty-hint">Loading…</div>
-  if (!project) return <div className="error-banner">{error ?? 'Not found'}</div>
+  if (loading) return <div className="editor-loading">Loading…</div>
+  if (!project)
+    return <div className="editor-loading error">{error ?? 'Not found'}</div>
 
-  const canTranscribe = Boolean(video) && !busy
-  const cutsApplied =
-    project.status === 'ai_cut_ready' || project.status === 'rendered'
-  const canRender = cutsApplied && !renderBusy
-  const viewingExport = exports.find((e) => e.id === viewingExportId) ?? null
-  const previewMediaId = viewingExport ? viewingExport.id : video?.id
+  const duration = editor.data?.duration ?? 0
 
   return (
-    <div className="detail editor-detail">
-      <div className="detail-topbar">
-        <button className="btn back-btn" onClick={onBack}>
+    <div className="editor-root">
+      {/* Top bar */}
+      <div className="editor-topbar">
+        <button className="btn small" onClick={onBack}>
           ← Projects
         </button>
-        <div className="detail-title">
-          <h1>{project.name}</h1>
-          <span className="subtitle">
+        <div className="editor-title">
+          <strong>{project.name}</strong>
+          <span className="editor-meta">
             {video
-              ? `${formatSize(video.size_bytes)} · ${formatDuration(video.duration_seconds)} · ${video.width}×${video.height} · ${
-                  video.storage_kind === 'copied' ? 'Copied' : 'Referenced'
-                }`
-              : 'No video imported yet'}
+              ? `${formatDuration(video.duration_seconds)} · ${video.width}×${video.height} · ${formatSize(video.size_bytes)}`
+              : 'No video imported'}
           </span>
+        </div>
+        <div className="topbar-actions">
+          <button className="btn small" onClick={() => setShowImport(true)}>
+            + Import
+          </button>
+          <button
+            className="btn small"
+            onClick={() => startTranscribe(false)}
+            disabled={!video || busy}
+          >
+            {busy ? `Transcribing ${Math.round((job?.progress ?? 0) * 100)}%` : '🎙 Transcribe'}
+          </button>
+          <button
+            className="btn small primary"
+            onClick={startRender}
+            disabled={renderBusy || !editor.data}
+          >
+            {renderBusy
+              ? `Rendering ${Math.round((renderJob?.progress ?? 0) * 100)}%`
+              : '🎬 Render'}
+          </button>
+          {exportsList.map((ex) => (
+            <a
+              key={ex.id}
+              className="export-link"
+              href={api.mediaFileUrl(ex.id)}
+              download={ex.original_filename}
+              title="Download export"
+            >
+              ↓ {ex.original_filename}
+            </a>
+          ))}
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {(txError || renderError || needConfirmLong) && (
+        <div className="editor-alerts">
+          {txError && <span className="alert err">{txError}</span>}
+          {renderError && <span className="alert err">{renderError}</span>}
+          {needConfirmLong && (
+            <span className="alert warn">
+              {needConfirmLong}{' '}
+              <button className="btn small" onClick={() => startTranscribe(true)}>
+                Transcribe anyway
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
-      <div className="editor">
-        {/* Left: tools panel — contextual actions on the selected element */}
-        <div className="tools">
-          <button
-            className="tool-btn"
-            title="Import video"
-            onClick={() => setShowImport(true)}
-          >
-            <span className="tool-ico">＋</span>
-            <span className="tool-label">Import</span>
-          </button>
+      {/* Middle: preview (+ inspector) and AI chat */}
+      <div className="editor-mid">
+        <div className="stage">
+          {editor.data ? (
+            <PreviewCanvas
+              data={editor.data}
+              playhead={editor.playhead}
+              playing={editor.playing}
+              duration={duration}
+              setPlayhead={editor.setPlayhead}
+              setPlaying={editor.setPlaying}
+            />
+          ) : (
+            <div className="editor-loading">Loading timeline…</div>
+          )}
 
-          <div className="tool-divider" />
-
-          {selected === 'video' && video ? (
-            <div className="tool-section">
-              <div className="tool-section-title">Video segment</div>
+          {selectedClip && selectedClip.type === 'video' && (
+            <div className="inspector">
+              <span className="insp-title">Color</span>
+              <label>
+                Brightness
+                <input
+                  type="range"
+                  min="0.2"
+                  max="2"
+                  step="0.05"
+                  value={selectedClip.color?.brightness ?? 1}
+                  onChange={(e) => setColor({ brightness: +e.target.value })}
+                />
+              </label>
+              <label>
+                Contrast
+                <input
+                  type="range"
+                  min="0.2"
+                  max="2"
+                  step="0.05"
+                  value={selectedClip.color?.contrast ?? 1}
+                  onChange={(e) => setColor({ contrast: +e.target.value })}
+                />
+              </label>
+              <label>
+                Saturation
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value={selectedClip.color?.saturation ?? 1}
+                  onChange={(e) => setColor({ saturation: +e.target.value })}
+                />
+              </label>
               <button
-                className="tool-btn"
-                title="Transcribe this segment"
-                onClick={() => startTranscribe(false)}
-                disabled={!canTranscribe}
+                className="btn small"
+                onClick={() => setColor({ ...NEUTRAL_COLOR })}
               >
-                <span className="tool-ico">🎙</span>
-                <span className="tool-label">
-                  {busy ? 'Working…' : transcript ? 'Re-transcribe' : 'Transcribe'}
-                </span>
-              </button>
-            </div>
-          ) : (
-            <div className="tool-hint">Select a segment</div>
-          )}
-
-          <div className="tool-divider" />
-          <div className="tool-section">
-            <div className="tool-section-title">Export</div>
-            <button
-              className="tool-btn"
-              title={
-                cutsApplied
-                  ? 'Render the applied cut plan to a video'
-                  : 'Apply an AI cut plan first'
-              }
-              onClick={startRender}
-              disabled={!canRender}
-            >
-              <span className="tool-ico">🎬</span>
-              <span className="tool-label">
-                {renderBusy
-                  ? 'Rendering…'
-                  : exports.length
-                    ? 'Re-render'
-                    : 'Render'}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {/* Center: preview */}
-        <div className="preview-pane">
-          {video ? (
-            <>
-              <video
-                key={previewMediaId}
-                ref={videoRef}
-                className="preview-video"
-                controls
-                poster={viewingExport ? undefined : api.mediaThumbnailUrl(video.id)}
-                src={api.mediaFileUrl(previewMediaId ?? video.id)}
-              />
-              {viewingExport && (
-                <div className="viewing-bar">
-                  <span>
-                    Viewing export · {viewingExport.original_filename}
-                  </span>
-                  <button
-                    className="btn small"
-                    onClick={() => setViewingExportId(null)}
-                  >
-                    Back to source
-                  </button>
-                </div>
-              )}
-              {txError && <div className="error-banner">{txError}</div>}
-              {renderError && <div className="error-banner">{renderError}</div>}
-              {needConfirmLong && (
-                <div className="confirm-box">
-                  <div>{needConfirmLong}</div>
-                  <div className="confirm-actions">
-                    <button className="btn" onClick={() => setNeedConfirmLong(null)}>
-                      Cancel
-                    </button>
-                    <button
-                      className="btn primary"
-                      onClick={() => startTranscribe(true)}
-                    >
-                      Transcribe anyway
-                    </button>
-                  </div>
-                </div>
-              )}
-              {busy && (
-                <div className="tx-progress">
-                  <div className="tx-bar">
-                    <div
-                      className="tx-fill"
-                      style={{ width: `${Math.round((job?.progress ?? 0) * 100)}%` }}
-                    />
-                  </div>
-                  <div className="tx-msg">{job?.message ?? 'Working…'}</div>
-                </div>
-              )}
-              {renderBusy && (
-                <div className="tx-progress">
-                  <div className="tx-bar">
-                    <div
-                      className="tx-fill"
-                      style={{
-                        width: `${Math.round((renderJob?.progress ?? 0) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                  <div className="tx-msg">
-                    {renderJob?.message ?? 'Rendering…'}
-                  </div>
-                </div>
-              )}
-              {exports.length > 0 && (
-                <div className="exports-bar">
-                  <span className="exports-label">Exports</span>
-                  {exports.map((ex) => (
-                    <div
-                      key={ex.id}
-                      className={`export-chip ${
-                        ex.id === viewingExportId ? 'active' : ''
-                      }`}
-                    >
-                      <button
-                        className="export-name"
-                        title="Preview this export"
-                        onClick={() => setViewingExportId(ex.id)}
-                      >
-                        ▶ {ex.original_filename}
-                      </button>
-                      <a
-                        className="export-dl"
-                        href={api.mediaFileUrl(ex.id)}
-                        download={ex.original_filename}
-                        title="Download"
-                      >
-                        ↓
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="preview-empty">
-              <div className="preview-empty-title">No video yet</div>
-              <div className="preview-empty-sub">
-                Import a video to start editing this project.
-              </div>
-              <button className="btn primary" onClick={() => setShowImport(true)}>
-                + Import video
+                Reset
               </button>
             </div>
           )}
         </div>
 
-        {/* Right: AI edit chat */}
-        <div className="chat-pane">
+        <aside className="side">
           <AiChat
             projectId={projectId}
             hasTranscript={Boolean(transcript)}
             onApplied={async () => {
+              await editor.reload()
               await load()
               onChanged()
             }}
           />
-        </div>
+        </aside>
+      </div>
 
-        {/* Bottom: tracks strip */}
-        <div className="tracks-pane">
-          <Tracks
-            duration={video?.duration_seconds ?? 0}
-            videoName={video?.original_filename ?? 'No video'}
-            hasAudio={Boolean(video)}
-            segments={transcript?.segments ?? []}
-            onSeek={seek}
-          />
-        </div>
+      {/* Bottom: timeline */}
+      <div className="editor-bottom">
+        <TimelineView editor={editor} mediaById={mediaById} duration={duration} />
       </div>
 
       {showImport && (

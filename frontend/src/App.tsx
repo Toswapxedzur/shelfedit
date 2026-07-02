@@ -59,21 +59,26 @@ export default function App() {
     }
   }
 
+  // The editor takes over the whole window (no sidebar, edge-to-edge).
+  if (openProjectId) {
+    return (
+      <ProjectDetail
+        projectId={openProjectId}
+        onBack={() => {
+          setOpenProjectId(null)
+          refresh()
+        }}
+        onChanged={refresh}
+      />
+    )
+  }
+
   return (
     <div className="app">
       <Sidebar active={view} onSelect={setView} />
 
       <main className="main">
-        {openProjectId ? (
-          <ProjectDetail
-            projectId={openProjectId}
-            onBack={() => {
-              setOpenProjectId(null)
-              refresh()
-            }}
-            onChanged={refresh}
-          />
-        ) : (
+        {(
           <>
             <div className="main-header">
               <div>
