@@ -10,7 +10,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from typing import Any
+
 from .models import (
+    AiRole,
+    ChangeStatus,
     JobKind,
     JobStatus,
     MediaType,
@@ -116,6 +120,26 @@ class TranscriptRead(BaseModel):
     plain_text: str
     created_at: datetime
     segments: list[SegmentRead] = []
+
+
+class AiSendRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class AiMessageRead(BaseModel):
+    id: str
+    role: AiRole
+    content: str
+    change: dict[str, Any] | None = None
+    change_status: ChangeStatus | None = None
+    created_at: datetime
+
+
+class TimelineRead(BaseModel):
+    id: str
+    version: int
+    data: dict[str, Any]
+    created_at: datetime
 
 
 class HealthResponse(BaseModel):

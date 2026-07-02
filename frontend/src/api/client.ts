@@ -81,6 +81,58 @@ export interface Transcript {
   segments: TranscriptSegment[]
 }
 
+export interface CutKeep {
+  start: number
+  end: number
+  label?: string
+  reason?: string
+}
+
+export interface AiChange {
+  type: string
+  keep?: CutKeep[]
+  remove?: { start: number; end: number; reason?: string }[]
+}
+
+export interface AiMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  change: AiChange | null
+  change_status: 'proposed' | 'applied' | 'rejected' | null
+  created_at: string
+}
+
+export interface TimelineElement {
+  id: string
+  type: string
+  media_id?: string
+  source_start?: number
+  source_end?: number
+  timeline_start: number
+  timeline_end?: number
+  text?: string
+}
+
+export interface TimelineTrack {
+  id: string
+  kind: 'video' | 'audio' | 'text'
+  order: number
+  elements: TimelineElement[]
+}
+
+export interface TimelineData {
+  duration: number
+  tracks: TimelineTrack[]
+}
+
+export interface Timeline {
+  id: string
+  version: number
+  data: TimelineData
+  created_at: string
+}
+
 // Thrown when a request needs explicit confirmation (HTTP 409).
 export class ConfirmationRequiredError extends Error {}
 // Back-compat alias for the import flow.
@@ -160,6 +212,20 @@ export const api = {
   getJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
   getTranscript: (projectId: string) =>
     request<Transcript>(`/api/projects/${projectId}/transcript`),
+  getMessages: (projectId: string) =>
+    request<AiMessage[]>(`/api/projects/${projectId}/ai/messages`),
+  sendMessage: (projectId: string, content: string) =>
+    request<AiMessage[]>(`/api/projects/${projectId}/ai/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  applyChange: (projectId: string, messageId: string) =>
+    request<Timeline>(
+      `/api/projects/${projectId}/ai/messages/${messageId}/apply`,
+      { method: 'POST' },
+    ),
+  getTimeline: (projectId: string) =>
+    request<Timeline>(`/api/projects/${projectId}/timeline`),
 }
 
 export function formatDuration(seconds: number | null): string {

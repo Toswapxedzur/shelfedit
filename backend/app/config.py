@@ -62,6 +62,13 @@ class Settings:
             "SHELFEDIT_FAKE_TRANSCRIBE", ""
         ).strip().lower() in ("1", "true", "yes")
 
+        # Same idea for the AI edit assistant (cut planning).
+        self.fake_ai: bool = os.getenv("SHELFEDIT_FAKE_AI", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
         # CORS origins for the desktop/web client during local development.
         raw_origins = os.getenv(
             "CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
