@@ -53,8 +53,38 @@ export interface ImportOptions {
   confirmLarge?: boolean
 }
 
-// Thrown when a file exceeds the size limit and needs explicit confirmation.
-export class LargeFileError extends Error {}
+export type JobStatus = 'queued' | 'running' | 'done' | 'error'
+
+export interface Job {
+  id: string
+  project_id: string
+  kind: string
+  status: JobStatus
+  progress: number
+  message: string | null
+  error_message: string | null
+}
+
+export interface TranscriptSegment {
+  idx: number
+  start_seconds: number
+  end_seconds: number
+  text: string
+}
+
+export interface Transcript {
+  id: string
+  language: string | null
+  provider: string
+  model: string
+  plain_text: string
+  segments: TranscriptSegment[]
+}
+
+// Thrown when a request needs explicit confirmation (HTTP 409).
+export class ConfirmationRequiredError extends Error {}
+// Back-compat alias for the import flow.
+export const LargeFileError = ConfirmationRequiredError
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
@@ -69,7 +99,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore non-JSON error bodies
     }
-    if (resp.status === 409) throw new LargeFileError(detail)
+    if (resp.status === 409) throw new ConfirmationRequiredError(detail)
     throw new Error(detail)
   }
   return resp.json() as Promise<T>
@@ -122,6 +152,14 @@ export const api = {
     `/api/projects/${project.id}/thumbnail?v=${encodeURIComponent(project.updated_at)}`,
   mediaFileUrl: (mediaId: string) => `/api/media/${mediaId}/file`,
   mediaThumbnailUrl: (mediaId: string) => `/api/media/${mediaId}/thumbnail`,
+  transcribe: (projectId: string, confirmLong = false) =>
+    request<Job>(`/api/projects/${projectId}/transcribe`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_long: confirmLong }),
+    }),
+  getJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
+  getTranscript: (projectId: string) =>
+    request<Transcript>(`/api/projects/${projectId}/transcript`),
 }
 
 export function formatDuration(seconds: number | null): string {

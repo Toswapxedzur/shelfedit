@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import init_db
-from .routers import media, projects
+from .routers import media, projects, transcript
 from .schemas import HealthResponse
 
 # Built desktop UI (produced by `npm run build` in ../frontend).
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
 
     app.include_router(projects.router)
     app.include_router(media.router)
+    app.include_router(transcript.router)
 
     # Serve the built desktop UI as a fallback for any non-API path. API and
     # docs routes are registered above, so they take precedence over this mount.

@@ -72,6 +72,36 @@ def probe(path: Path) -> MediaProbe:
     return MediaProbe(duration_seconds=duration, width=width, height=height)
 
 
+def extract_audio(src: Path, dest: Path) -> Path:
+    """Extract a compact mono MP3 from the video for transcription.
+
+    Mono 16 kHz at a low bitrate keeps the file small so longer videos stay
+    under the transcription API's size limit. The source video is not modified.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise FFmpegError("ffmpeg not found on PATH")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-vn",  # drop video
+        "-ac",
+        "1",  # mono
+        "-ar",
+        "16000",  # 16 kHz
+        "-b:a",
+        "48k",
+        str(dest),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not dest.exists():
+        raise FFmpegError(f"audio extraction failed: {proc.stderr.strip()}")
+    return dest
+
+
 def generate_thumbnail(
     src: Path, dest: Path, at_seconds: float = 1.0, width: int = 640
 ) -> Path:

@@ -70,6 +70,70 @@ class Project(SQLModel, table=True):
     deleted_at: datetime | None = Field(default=None)
 
 
+class JobKind(str, Enum):
+    transcribe = "transcribe"
+    render = "render"
+
+
+class JobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    done = "done"
+    error = "error"
+
+
+class Job(SQLModel, table=True):
+    """A background task (transcription now, rendering later)."""
+
+    __tablename__ = "jobs"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(index=True, foreign_key="projects.id")
+    kind: JobKind
+    status: JobStatus = Field(default=JobStatus.queued)
+    progress: float = Field(default=0.0)  # 0.0 - 1.0
+    message: str | None = Field(default=None)
+    error_message: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class Transcript(SQLModel, table=True):
+    __tablename__ = "transcripts"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(index=True, foreign_key="projects.id")
+    media_asset_id: str = Field(foreign_key="media_assets.id")
+    language: str | None = Field(default=None)
+    provider: str = Field(default="openai")
+    model: str = Field(default="whisper-1")
+    raw_json_path: str | None = Field(default=None)
+    plain_text: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class TranscriptSegment(SQLModel, table=True):
+    __tablename__ = "transcript_segments"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    transcript_id: str = Field(index=True, foreign_key="transcripts.id")
+    idx: int = Field(default=0)
+    start_seconds: float
+    end_seconds: float
+    text: str
+
+
+class TranscriptWord(SQLModel, table=True):
+    __tablename__ = "transcript_words"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    transcript_id: str = Field(index=True, foreign_key="transcripts.id")
+    start_seconds: float
+    end_seconds: float
+    word: str
+    confidence: float | None = Field(default=None)
+
+
 class MediaAsset(SQLModel, table=True):
     __tablename__ = "media_assets"
 

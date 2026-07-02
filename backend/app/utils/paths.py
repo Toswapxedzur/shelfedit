@@ -43,3 +43,11 @@ def original_media_dir(project_id: str) -> Path:
 
 def thumbnails_dir(project_id: str) -> Path:
     return project_dir(project_id) / "thumbnails"
+
+
+def audio_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "media" / "audio"
+
+
+def transcripts_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "transcripts"
