@@ -73,21 +73,41 @@ def _normalize(raw: dict) -> NormalizedTranscript:
 
 
 def _fake_transcribe(audio_path: Path) -> dict:
-    """Canned result for offline dev/testing (SHELFEDIT_FAKE_TRANSCRIBE)."""
+    """Canned result for offline dev/testing (SHELFEDIT_FAKE_TRANSCRIBE).
+
+    Segments are spread evenly across the real audio duration so the offline
+    sample lines up with the actual clip on the timeline.
+    """
+    phrases = [
+        "This is a sample transcript",
+        "generated in offline mode.",
+        "It stands in for a real transcription.",
+    ]
+
+    # Best-effort duration probe; fall back to a nominal length if unavailable.
+    total = 9.0
+    try:
+        from ..utils.ffmpeg import probe
+
+        probed = probe(audio_path).duration_seconds
+        if probed and probed > 0:
+            total = probed
+    except Exception:  # noqa: BLE001 - offline sample must never hard-fail
+        pass
+
+    step = total / len(phrases)
+    segments = [
+        {
+            "start": round(i * step, 3),
+            "end": round(min((i + 1) * step, total), 3),
+            "text": phrase,
+        }
+        for i, phrase in enumerate(phrases)
+    ]
     return {
-        "text": "This is a sample transcript generated in offline mode. "
-        "It stands in for a real transcription so the workflow can be tested "
-        "without calling OpenAI.",
+        "text": " ".join(phrases),
         "language": "english",
-        "segments": [
-            {"start": 0.0, "end": 3.2, "text": "This is a sample transcript"},
-            {"start": 3.2, "end": 6.5, "text": "generated in offline mode."},
-            {
-                "start": 6.5,
-                "end": 10.0,
-                "text": "It stands in for a real transcription.",
-            },
-        ],
+        "segments": segments,
         "words": [],
     }
 

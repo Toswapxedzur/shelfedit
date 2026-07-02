@@ -46,6 +46,50 @@ Deliberately out of scope for the first timeline version (add later): keyframe
 animation, transitions between clips, color grading, masking, multi-band audio
 mixing, effects/filters, speed ramps.
 
+## 2b. Bonded elements
+
+Some elements are **bonded** to a parent element rather than standing alone.
+Bonding means they move/trim together with their parent and are conceptually
+"attached" to it.
+
+Examples:
+- **Audio bonded to video:** a video's own audio track is bonded to the video
+  element. Moving/trimming the video moves/trims its bonded audio. The user can
+  optionally detach it to edit separately.
+- **Transcript text bonded to a video segment:** transcribing a selected video
+  segment produces text elements (caption-like) bonded to that segment and
+  shown right next to it on the timeline.
+
+Bonding rules (v1):
+- A bonded element stores a reference to its parent element id.
+- Trimming/moving the parent updates bonded children.
+- Deleting the parent deletes (or detaches) its bonded children.
+- Transcription is therefore an **action on a selected video segment** that
+  attaches bonded transcript text to it — not a global project step.
+
+## 2c. Editor layout (target)
+
+A conventional editor arrangement:
+
+```text
++------+-----------------------+-----------------------+
+|      |                       |                       |
+| tool |     video preview     |     AI edit chat      |
+| bar  |      (center)         |   (history + changes) |
+|(left |                       |                       |
+| full +-----------------------+-----------------------+
+|height|         tracks strip (bottom, full width)     |
++------+-----------------------------------------------+
+```
+
+- **Tools panel:** thin, full height, far left.
+- **Preview:** center; **AI chat:** right; roughly equal width.
+- **Tracks strip:** across the bottom, from the tools panel to the right wall.
+
+The AI edit chat is a separate box (not attached to any element) showing the
+conversation and the proposed/applied changes. Transcript is not a separate box;
+it lives as bonded text on the tracks.
+
 ## 3. Track model
 
 - Multiple stacked tracks. Each track has a **kind**: video, audio, or text.
@@ -132,6 +176,24 @@ The renderer turns the timeline JSON into a single FFmpeg composition:
 
 This is why the timeline must come **after** a basic render engine exists: the
 timeline is only as good as the renderer that realizes it.
+
+## 6b. AI edit assistant (agentic, long-lived)
+
+The AI edit chat is designed to grow into a long-lived, Cursor-like agent that
+can perform increasingly complex editing tasks:
+
+- **Conversation memory:** the chat is multi-turn and remembers prior messages,
+  the transcript, and the current timeline, so the user can refine
+  ("also cut the intro", "make it tighter").
+- **Change envelope:** every proposal is a typed change. v1 supports
+  `cut_plan` (keep/remove sections); future types include add-text,
+  reorder, add-overlay, etc. The UI renders a change card per proposal.
+- **Review-before-apply:** proposals never take effect until the user clicks
+  Apply. Applying a change updates the timeline; the change is then marked
+  applied in the chat history.
+- **Toward agentic tool-use:** later the assistant can call editing "tools"
+  (trim, split, insert text, place overlay) as structured actions against the
+  timeline, enabling multi-step tasks. v1 keeps a single change per turn.
 
 ## 7. Relationship to the AI cut workflow
 

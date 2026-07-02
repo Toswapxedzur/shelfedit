@@ -10,6 +10,8 @@ import {
   type Transcript,
 } from '../api/client'
 import { ImportMediaModal } from './ImportMediaModal'
+import { AiChat } from './AiChat'
+import { Tracks } from './Tracks'
 
 interface Props {
   projectId: string
@@ -23,12 +25,14 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
+  const [selected, setSelected] = useState<'video' | null>(null)
 
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [txError, setTxError] = useState<string | null>(null)
   const [needConfirmLong, setNeedConfirmLong] = useState<string | null>(null)
   const pollRef = useRef<number | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -39,12 +43,10 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
       setProject(p)
       setMedia(m)
       setError(null)
-      if (p.status === 'transcribed') {
-        try {
-          setTranscript(await api.getTranscript(projectId))
-        } catch {
-          /* transcript may be absent; ignore */
-        }
+      try {
+        setTranscript(await api.getTranscript(projectId))
+      } catch {
+        setTranscript(null)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project')
@@ -57,7 +59,6 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     load()
   }, [load])
 
-  // Clean up any polling timer on unmount.
   useEffect(() => {
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
@@ -65,6 +66,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   }, [])
 
   const video = media.find((m) => m.type === 'video')
+
+  // Auto-select the video segment once it exists.
+  useEffect(() => {
+    if (video && selected === null) setSelected('video')
+  }, [video, selected])
+
   const busy = job?.status === 'queued' || job?.status === 'running'
 
   const pollJob = (jobId: string) => {
@@ -109,13 +116,21 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     onChanged()
   }
 
+  const seek = (t: number) => {
+    const el = videoRef.current
+    if (el) {
+      el.currentTime = t
+      void el.play().catch(() => {})
+    }
+  }
+
   if (loading) return <div className="empty-hint">Loading…</div>
   if (!project) return <div className="error-banner">{error ?? 'Not found'}</div>
 
   const canTranscribe = Boolean(video) && !busy
 
   return (
-    <div className="detail">
+    <div className="detail editor-detail">
       <div className="detail-topbar">
         <button className="btn back-btn" onClick={onBack}>
           ← Projects
@@ -134,55 +149,57 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="detail-body">
-        <div className="detail-main">
-          <div className="preview">
-            {video ? (
+      <div className="editor">
+        {/* Left: tools panel — contextual actions on the selected element */}
+        <div className="tools">
+          <button
+            className="tool-btn"
+            title="Import video"
+            onClick={() => setShowImport(true)}
+          >
+            <span className="tool-ico">＋</span>
+            <span className="tool-label">Import</span>
+          </button>
+
+          <div className="tool-divider" />
+
+          {selected === 'video' && video ? (
+            <div className="tool-section">
+              <div className="tool-section-title">Video segment</div>
+              <button
+                className="tool-btn"
+                title="Transcribe this segment"
+                onClick={() => startTranscribe(false)}
+                disabled={!canTranscribe}
+              >
+                <span className="tool-ico">🎙</span>
+                <span className="tool-label">
+                  {busy ? 'Working…' : transcript ? 'Re-transcribe' : 'Transcribe'}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div className="tool-hint">Select a segment</div>
+          )}
+        </div>
+
+        {/* Center: preview */}
+        <div className="preview-pane">
+          {video ? (
+            <>
               <video
+                ref={videoRef}
                 className="preview-video"
                 controls
                 poster={api.mediaThumbnailUrl(video.id)}
                 src={api.mediaFileUrl(video.id)}
               />
-            ) : (
-              <div className="preview-empty">
-                <div className="preview-empty-title">No video yet</div>
-                <div className="preview-empty-sub">
-                  Import a video to start editing this project.
-                </div>
-                <button
-                  className="btn primary"
-                  onClick={() => setShowImport(true)}
-                >
-                  + Import video
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Transcript panel */}
-          {video && (
-            <div className="transcript-panel">
-              <div className="transcript-head">
-                <h3>Transcript</h3>
-                {transcript?.language && (
-                  <span className="tag">{transcript.language}</span>
-                )}
-                {transcript?.provider === 'offline' && (
-                  <span className="tag warn">offline sample</span>
-                )}
-              </div>
-
               {txError && <div className="error-banner">{txError}</div>}
-
               {needConfirmLong && (
                 <div className="confirm-box">
                   <div>{needConfirmLong}</div>
                   <div className="confirm-actions">
-                    <button
-                      className="btn"
-                      onClick={() => setNeedConfirmLong(null)}
-                    >
+                    <button className="btn" onClick={() => setNeedConfirmLong(null)}>
                       Cancel
                     </button>
                     <button
@@ -194,8 +211,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
                   </div>
                 </div>
               )}
-
-              {busy ? (
+              {busy && (
                 <div className="tx-progress">
                   <div className="tx-bar">
                     <div
@@ -205,72 +221,43 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
                   </div>
                   <div className="tx-msg">{job?.message ?? 'Working…'}</div>
                 </div>
-              ) : transcript ? (
-                <div className="segments">
-                  {transcript.segments.length > 0 ? (
-                    transcript.segments.map((s) => (
-                      <div className="segment" key={s.idx}>
-                        <span className="seg-time">
-                          {formatDuration(s.start_seconds)}
-                        </span>
-                        <span className="seg-text">{s.text}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="seg-text">{transcript.plain_text}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="empty-hint">
-                  No transcript yet. Run “Transcribe” to generate one.
-                </div>
               )}
+            </>
+          ) : (
+            <div className="preview-empty">
+              <div className="preview-empty-title">No video yet</div>
+              <div className="preview-empty-sub">
+                Import a video to start editing this project.
+              </div>
+              <button className="btn primary" onClick={() => setShowImport(true)}>
+                + Import video
+              </button>
             </div>
           )}
         </div>
 
-        <aside className="workflow">
-          <h3>Workflow</h3>
-          <WorkflowStep n={1} title="Import video" done={Boolean(video)} active={!video}>
-            {video ? (
-              <button className="btn small" onClick={() => setShowImport(true)}>
-                Replace / add
-              </button>
-            ) : (
-              <button
-                className="btn primary small"
-                onClick={() => setShowImport(true)}
-              >
-                Import
-              </button>
-            )}
-          </WorkflowStep>
+        {/* Right: AI edit chat */}
+        <div className="chat-pane">
+          <AiChat
+            projectId={projectId}
+            hasTranscript={Boolean(transcript)}
+            onApplied={async () => {
+              await load()
+              onChanged()
+            }}
+          />
+        </div>
 
-          <WorkflowStep
-            n={2}
-            title="Transcribe"
-            done={Boolean(transcript)}
-            active={Boolean(video) && !transcript}
-            disabled={!video}
-          >
-            {video && (
-              <button
-                className="btn primary small"
-                onClick={() => startTranscribe(false)}
-                disabled={!canTranscribe}
-              >
-                {busy
-                  ? 'Transcribing…'
-                  : transcript
-                    ? 'Re-transcribe'
-                    : 'Transcribe'}
-              </button>
-            )}
-          </WorkflowStep>
-
-          <WorkflowStep n={3} title="AI cut plan" soon />
-          <WorkflowStep n={4} title="Review & render" soon />
-        </aside>
+        {/* Bottom: tracks strip */}
+        <div className="tracks-pane">
+          <Tracks
+            duration={video?.duration_seconds ?? 0}
+            videoName={video?.original_filename ?? 'No video'}
+            hasAudio={Boolean(video)}
+            segments={transcript?.segments ?? []}
+            onSeek={seek}
+          />
+        </div>
       </div>
 
       {showImport && (
@@ -280,39 +267,6 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           onImported={handleImported}
         />
       )}
-    </div>
-  )
-}
-
-function WorkflowStep({
-  n,
-  title,
-  done,
-  active,
-  soon,
-  disabled,
-  children,
-}: {
-  n: number
-  title: string
-  done?: boolean
-  active?: boolean
-  soon?: boolean
-  disabled?: boolean
-  children?: React.ReactNode
-}) {
-  return (
-    <div
-      className={`wf-step ${active ? 'active' : ''} ${soon || disabled ? 'soon' : ''}`}
-    >
-      <span className="wf-num">{done ? '✓' : n}</span>
-      <div className="wf-main">
-        <div className="wf-title">
-          {title}
-          {soon && <span className="badge">soon</span>}
-        </div>
-        {children && <div className="wf-actions">{children}</div>}
-      </div>
     </div>
   )
 }

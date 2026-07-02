@@ -134,6 +134,44 @@ class TranscriptWord(SQLModel, table=True):
     confidence: float | None = Field(default=None)
 
 
+class Timeline(SQLModel, table=True):
+    """A versioned edit timeline (stored as JSON). Applying AI cuts creates one."""
+
+    __tablename__ = "timelines"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(index=True, foreign_key="projects.id")
+    version: int = Field(default=1)
+    data_json: str = Field(default="{}")
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class AiRole(str, Enum):
+    user = "user"
+    assistant = "assistant"
+
+
+class ChangeStatus(str, Enum):
+    proposed = "proposed"
+    applied = "applied"
+    rejected = "rejected"
+
+
+class AiMessage(SQLModel, table=True):
+    """One turn in the AI edit conversation (per project)."""
+
+    __tablename__ = "ai_messages"
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(index=True, foreign_key="projects.id")
+    role: AiRole
+    content: str = Field(default="")
+    # A proposed change (e.g. a cut plan) as JSON, when the assistant produced one.
+    change_json: str | None = Field(default=None)
+    change_status: ChangeStatus | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class MediaAsset(SQLModel, table=True):
     __tablename__ = "media_assets"
 

@@ -46,6 +46,10 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
     importlib.reload(transcript_router)
 
+    import app.routers.ai as ai_router
+
+    importlib.reload(ai_router)
+
     import app.main as main
 
     importlib.reload(main)
