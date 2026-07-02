@@ -116,9 +116,12 @@ export const api = {
     }),
   listMedia: (projectId: string) =>
     request<MediaAsset[]>(`/api/projects/${projectId}/media`),
+  getProject: (id: string) => request<Project>(`/api/projects/${id}`),
   // Cache-busted so a new thumbnail shows after re-import.
   projectThumbnailUrl: (project: Project) =>
     `/api/projects/${project.id}/thumbnail?v=${encodeURIComponent(project.updated_at)}`,
+  mediaFileUrl: (mediaId: string) => `/api/media/${mediaId}/file`,
+  mediaThumbnailUrl: (mediaId: string) => `/api/media/${mediaId}/thumbnail`,
 }
 
 export function formatDuration(seconds: number | null): string {
