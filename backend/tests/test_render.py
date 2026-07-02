@@ -1,0 +1,112 @@
+"""Render integration tests (offline). Import -> transcribe -> cut -> apply -> render.
+
+Uses fake transcription + fake AI (no network) but a real FFmpeg render, matching
+the plan's integration-test recipe. Skips when ffmpeg is unavailable.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import time
+
+import pytest
+
+from app.utils.ffmpeg import ffmpeg_available
+
+
+@pytest.fixture()
+def av_video(tmp_path):
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not available")
+    out = tmp_path / "av.mp4"
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=3:size=320x240:rate=10",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+        "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-shortest",
+        str(out),
+    ]
+    assert subprocess.run(cmd, capture_output=True).returncode == 0
+    return out
+
+
+def _wait_job(client, job_id, timeout=40.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        j = client.get(f"/api/jobs/{job_id}").json()
+        if j["status"] in ("done", "error"):
+            return j
+        time.sleep(0.2)
+    return None
+
+
+@pytest.fixture()
+def project_with_timeline(client, av_video, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setenv("SHELFEDIT_FAKE_TRANSCRIBE", "1")
+    monkeypatch.setenv("SHELFEDIT_FAKE_AI", "1")
+    get_settings.cache_clear()
+
+    pid = client.post("/api/projects", json={"name": "Render"}).json()["id"]
+    client.post(
+        f"/api/projects/{pid}/media/import",
+        json={"source_path": str(av_video), "copy": True},
+    )
+    job = client.post(f"/api/projects/{pid}/transcribe", json={}).json()
+    assert _wait_job(client, job["id"])["status"] == "done"
+
+    msgs = client.post(
+        f"/api/projects/{pid}/ai/messages", json={"content": "cut"}
+    ).json()
+    assistant = msgs[1]
+    client.post(f"/api/projects/{pid}/ai/messages/{assistant['id']}/apply")
+    return pid
+
+
+def test_render_requires_timeline(client, av_video, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setenv("SHELFEDIT_FAKE_TRANSCRIBE", "1")
+    get_settings.cache_clear()
+
+    pid = client.post("/api/projects", json={"name": "NoCut"}).json()["id"]
+    client.post(
+        f"/api/projects/{pid}/media/import",
+        json={"source_path": str(av_video), "copy": True},
+    )
+    resp = client.post(f"/api/projects/{pid}/render")
+    assert resp.status_code == 400
+
+
+def test_render_produces_playable_export(project_with_timeline, client):
+    pid = project_with_timeline
+    job = client.post(f"/api/projects/{pid}/render").json()
+    final = _wait_job(client, job["id"])
+    assert final is not None, "render job did not finish"
+    assert final["status"] == "done", final.get("error_message")
+    assert final["progress"] == 1.0
+
+    exports = client.get(f"/api/projects/{pid}/exports").json()
+    assert len(exports) == 1
+    export = exports[0]
+    assert export["type"] == "export"
+    assert export["original_filename"] == "export_v1.mp4"
+    assert export["duration_seconds"] and export["duration_seconds"] > 0
+
+    # Project advanced, and the export streams back.
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "rendered"
+    file_resp = client.get(f"/api/media/{export['id']}/file")
+    assert file_resp.status_code == 200
+    assert len(file_resp.content) > 0
+
+
+def test_second_render_is_versioned(project_with_timeline, client):
+    pid = project_with_timeline
+    for _ in range(2):
+        job = client.post(f"/api/projects/{pid}/render").json()
+        assert _wait_job(client, job["id"])["status"] == "done"
+
+    exports = client.get(f"/api/projects/{pid}/exports").json()
+    names = {e["original_filename"] for e in exports}
+    assert names == {"export_v1.mp4", "export_v2.mp4"}
