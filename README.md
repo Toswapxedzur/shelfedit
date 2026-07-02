@@ -5,10 +5,11 @@ transcribe the audio, let an AI propose which sections to keep vs. cut, review
 the plan, and render the final video locally. Your original footage always stays
 on your machine and is never modified.
 
-> **Status: backend skeleton + desktop shell.** Project management, a health
-> check, and a working desktop app (native window + React home screen) exist.
-> Media import, transcription, AI cutting, and rendering are future phases. An
-> online server is deferred and out of scope.
+> **Status: desktop app + media import.** Project management, a desktop app
+> (native window + React home screen), and video import (copy or reference,
+> with thumbnails and duration/size probing) all work. Transcription, AI
+> cutting, and rendering are future phases. An online server is deferred and
+> out of scope.
 
 ## Architecture (north star)
 
@@ -78,16 +79,29 @@ source .venv/bin/activate
 pytest -q
 ```
 
-## Phase 1 endpoints
+## Endpoints
 
-| Method | Path                       | Purpose                                  |
-| ------ | -------------------------- | ---------------------------------------- |
-| GET    | `/health`                  | Liveness check                           |
-| POST   | `/api/projects`            | Create a project                         |
-| GET    | `/api/projects`            | List active projects                     |
-| GET    | `/api/projects/{id}`       | Get one project                          |
-| PATCH  | `/api/projects/{id}`       | Update a project                         |
-| DELETE | `/api/projects/{id}`       | Soft-delete a project (never touches files) |
+| Method | Path                                       | Purpose                                     |
+| ------ | ------------------------------------------ | ------------------------------------------- |
+| GET    | `/health`                                  | Liveness check                              |
+| POST   | `/api/projects`                            | Create a project                            |
+| GET    | `/api/projects`                            | List active projects (with media summary)   |
+| GET    | `/api/projects/{id}`                       | Get one project                             |
+| PATCH  | `/api/projects/{id}`                       | Update a project                            |
+| DELETE | `/api/projects/{id}`                       | Soft-delete a project (never touches files) |
+| POST   | `/api/projects/{id}/media/import`          | Import a local video (copy or reference)    |
+| GET    | `/api/projects/{id}/media`                 | List a project's media                      |
+| GET    | `/api/projects/{id}/thumbnail`             | Project thumbnail image                     |
+| GET    | `/api/media/{media_id}/thumbnail`          | Media thumbnail image                       |
+
+## Media import
+
+- **Copy** into the project folder (self-contained) or **reference** the file in
+  place (no duplicate) — chosen per import.
+- The file is never uploaded over HTTP; the backend reads it from disk, so even
+  huge videos import instantly in reference mode.
+- On import the app probes duration/dimensions and generates a thumbnail.
+- Files over `MAX_IMPORT_FILE_GB` (default 30) require explicit confirmation.
 
 ## Safety guarantees
 

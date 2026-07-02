@@ -33,6 +33,10 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
     importlib.reload(projects_router)
 
+    import app.routers.media as media_router
+
+    importlib.reload(media_router)
+
     import app.main as main
 
     importlib.reload(main)
