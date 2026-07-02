@@ -8,14 +8,19 @@ from the backend/ directory.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import init_db
 from .routers import projects
 from .schemas import HealthResponse
+
+# Built desktop UI (produced by `npm run build` in ../frontend).
+_WEBUI_DIR = Path(__file__).resolve().parent / "webui"
 
 
 @asynccontextmanager
@@ -44,6 +49,13 @@ def create_app() -> FastAPI:
         return HealthResponse(status="ok", app=settings.app_name)
 
     app.include_router(projects.router)
+
+    # Serve the built desktop UI as a fallback for any non-API path. API and
+    # docs routes are registered above, so they take precedence over this mount.
+    # When the UI has not been built yet, we skip this so the API still runs.
+    if _WEBUI_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=_WEBUI_DIR, html=True), name="webui")
+
     return app
 
 
