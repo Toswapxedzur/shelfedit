@@ -78,6 +78,30 @@ def get_media_thumbnail(media_id: str, session: Session = Depends(get_session)):
     return FileResponse(path, media_type="image/jpeg")
 
 
+# Common video containers -> MIME type for the <video> element.
+_VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+}
+
+
+@router.get("/api/media/{media_id}/file")
+def get_media_file(media_id: str, session: Session = Depends(get_session)):
+    """Stream the video file for in-app preview. Read-only; supports range."""
+    asset = session.get(MediaAsset, media_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+    path = Path(asset.local_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Media file missing")
+    media_type = _VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type, filename=asset.original_filename)
+
+
 @router.get("/api/projects/{project_id}/thumbnail")
 def get_project_thumbnail(project_id: str, session: Session = Depends(get_session)):
     project = _get_active_project(project_id, session)

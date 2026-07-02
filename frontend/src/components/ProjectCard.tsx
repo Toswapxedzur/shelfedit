@@ -9,7 +9,7 @@ import {
 interface Props {
   project: Project
   onDelete: (project: Project) => void
-  onImport: (project: Project) => void
+  onOpen: (project: Project) => void
 }
 
 const STATUS_LABEL: Record<ProjectStatus, { text: string; tone: string }> = {
@@ -39,16 +39,27 @@ function relativeTime(iso: string): string {
   return `${Math.floor(secs / 86400)} d ago`
 }
 
-export function ProjectCard({ project, onDelete, onImport }: Props) {
+export function ProjectCard({ project, onDelete, onOpen }: Props) {
   const status = STATUS_LABEL[project.status]
   const hasMedia = project.media_count > 0
 
   return (
-    <div className="card">
+    <div
+      className="card clickable"
+      onClick={() => onOpen(project)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onOpen(project)
+      }}
+    >
       <button
         className="card-delete"
         title="Delete project"
-        onClick={() => onDelete(project)}
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete(project)
+        }}
       >
         ×
       </button>
@@ -60,9 +71,7 @@ export function ProjectCard({ project, onDelete, onImport }: Props) {
             alt={project.name}
           />
         ) : (
-          <button className="thumb-import" onClick={() => onImport(project)}>
-            + Import video
-          </button>
+          <span>No media yet</span>
         )}
       </div>
       <div className="card-body">

@@ -102,6 +102,18 @@ def test_list_media(client, sample_video):
     assert len(resp.json()) == 1
 
 
+def test_media_file_is_served(client, sample_video):
+    pid = _new_project(client)
+    media = client.post(
+        f"/api/projects/{pid}/media/import",
+        json={"source_path": str(sample_video), "copy": True},
+    ).json()
+    resp = client.get(f"/api/media/{media['id']}/file")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "video/mp4"
+    assert len(resp.content) > 0
+
+
 def test_large_file_requires_confirmation(client, sample_video, monkeypatch):
     """With the limit forced to 0 GB, any file needs explicit confirmation."""
     from app.config import get_settings
