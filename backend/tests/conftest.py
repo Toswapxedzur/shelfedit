@@ -50,6 +50,10 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
     importlib.reload(ai_router)
 
+    import app.routers.render as render_router
+
+    importlib.reload(render_router)
+
     import app.main as main
 
     importlib.reload(main)

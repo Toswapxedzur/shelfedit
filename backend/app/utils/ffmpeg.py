@@ -72,6 +72,26 @@ def probe(path: Path) -> MediaProbe:
     return MediaProbe(duration_seconds=duration, width=width, height=height)
 
 
+def has_audio_stream(path: Path) -> bool:
+    """True if the file has at least one audio stream (via ffprobe)."""
+    if shutil.which("ffprobe") is None:
+        raise FFmpegError("ffprobe not found on PATH")
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        str(path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode == 0 and proc.stdout.strip() != ""
+
+
 def extract_audio(src: Path, dest: Path) -> Path:
     """Extract a compact mono MP3 from the video for transcription.
 

@@ -51,3 +51,7 @@ def audio_dir(project_id: str) -> Path:
 
 def transcripts_dir(project_id: str) -> Path:
     return project_dir(project_id) / "transcripts"
+
+
+def renders_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "renders"

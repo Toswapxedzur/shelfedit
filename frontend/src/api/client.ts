@@ -226,6 +226,10 @@ export const api = {
     ),
   getTimeline: (projectId: string) =>
     request<Timeline>(`/api/projects/${projectId}/timeline`),
+  render: (projectId: string) =>
+    request<Job>(`/api/projects/${projectId}/render`, { method: 'POST' }),
+  getExports: (projectId: string) =>
+    request<MediaAsset[]>(`/api/projects/${projectId}/exports`),
 }
 
 export function formatDuration(seconds: number | null): string {

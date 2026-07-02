@@ -5,11 +5,12 @@ transcribe the audio, let an AI propose which sections to keep vs. cut, review
 the plan, and render the final video locally. Your original footage always stays
 on your machine and is never modified.
 
-> **Status: desktop app + import + transcription + AI edit (cut planning).**
+> **Status: end-to-end MVP — import → transcribe → AI cut → render.**
 > Project management, a desktop app (native window + React editor), video import
-> (copy or reference), in-app playback, OpenAI transcription, and an AI edit chat
-> that proposes reviewable cut plans all work. Rendering the approved timeline is
-> the next phase. An online server is deferred and out of scope.
+> (copy or reference), in-app playback, OpenAI transcription, an AI edit chat that
+> proposes reviewable cut plans, and **local FFmpeg rendering to a versioned MP4
+> export** all work. Simple overlays are the next phase. An online server is
+> deferred and out of scope.
 
 ## Architecture (north star)
 
@@ -101,6 +102,9 @@ pytest -q
 | POST   | `/api/projects/{id}/ai/messages`           | Send a message; get the assistant's reply   |
 | POST   | `/api/projects/{id}/ai/messages/{mid}/apply` | Apply a proposed change to the timeline   |
 | GET    | `/api/projects/{id}/timeline`              | Get the current (versioned) timeline        |
+| POST   | `/api/projects/{id}/render`                | Render the applied timeline to an MP4        |
+| GET    | `/api/projects/{id}/exports`               | List rendered export videos                 |
+| GET    | `/api/media/{media_id}/file`               | Stream an export (or source) for playback   |
 
 ## Media import
 
@@ -141,13 +145,26 @@ pytest -q
 - Offline/dev mode: set `SHELFEDIT_FAKE_AI=1` to get canned cut plans with no API
   key or cost.
 
+## Render & export
+
+- Once a cut plan is applied (a timeline exists), use **Render** in the editor's
+  tools panel. It runs a background FFmpeg job with live progress.
+- Rendering trims the kept segments and concatenates them in one re-encode pass,
+  keeping audio in sync. The source file is only read, never modified.
+- Exports are written to versioned filenames (`export_v1.mp4`, `export_v2.mp4`,
+  …) so a render never overwrites a previous one.
+- Finished exports appear in an **Exports** bar under the preview: click to play
+  the result in-app, or use the download link. The project status becomes
+  `rendered`.
+
 ## Roadmap (next)
 
-1. **Render** — turn the applied timeline into a final video with FFmpeg.
+1. **Simple overlays** — manual text / image / small-video overlays baked into
+   the render (Phase 7 of the plan).
 2. **Multi-track timeline editing** — full drag/trim/split editing on the tracks
    strip, plus the bonded-element model. Designed in
-   [`docs/timeline-design.md`](docs/timeline-design.md); scheduled alongside the
-   render engine so the timeline maps exactly to the rendered output.
+   [`docs/timeline-design.md`](docs/timeline-design.md).
+3. **Asset descriptions** and, much later, an optional online sync layer.
 
 ## Safety guarantees
 
