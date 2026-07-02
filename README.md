@@ -119,6 +119,17 @@ pytest -q
 - Offline/dev mode: set `SHELFEDIT_FAKE_TRANSCRIBE=1` to exercise the whole
   workflow with a canned transcript and no API key or cost.
 
+## Roadmap (next)
+
+1. **AI cut plan** — feed the transcript to GPT to propose keep/cut sections for
+   your review (nothing applied automatically).
+2. **Apply cuts + render** — turn accepted cuts into a timeline and render a
+   final video with FFmpeg.
+3. **Multi-track timeline editor** — a professional, Movavi-class editing surface
+   with video / audio / text elements. Designed in
+   [`docs/timeline-design.md`](docs/timeline-design.md); scheduled after a basic
+   render engine exists so the timeline maps exactly to the rendered output.
+
 ## Safety guarantees
 
 - Original video files are never modified or deleted by the app.
