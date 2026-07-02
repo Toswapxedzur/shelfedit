@@ -10,7 +10,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import ProjectStatus, StorageMode
+from .models import MediaType, ProjectStatus, StorageKind, StorageMode
 
 
 class ProjectCreate(BaseModel):
@@ -35,6 +35,42 @@ class ProjectRead(BaseModel):
     thumbnail_path: str | None
     status: ProjectStatus
     storage_mode: StorageMode
+
+    # Summary of the project's primary video, filled in by the API when known.
+    media_count: int = 0
+    duration_seconds: float | None = None
+    size_bytes: int | None = None
+    has_thumbnail: bool = False
+
+
+class MediaImportRequest(BaseModel):
+    # Accept the JSON key "copy" without shadowing BaseModel.copy().
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Absolute path to a local video file. The backend never receives the file
+    # bytes over HTTP; it reads the file directly from disk (local-first).
+    source_path: str = Field(min_length=1)
+    # True = copy into the project folder; False = reference in place.
+    copy_into_project: bool = Field(default=True, alias="copy")
+    # Set true to proceed past the large-file size guard.
+    confirm_large: bool = False
+
+
+class MediaRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: str
+    type: MediaType
+    storage_kind: StorageKind
+    original_filename: str
+    relative_path: str | None
+    duration_seconds: float | None
+    width: int | None
+    height: int | None
+    size_bytes: int | None
+    description: str | None
+    created_at: datetime
 
 
 class HealthResponse(BaseModel):

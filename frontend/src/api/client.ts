@@ -26,7 +26,35 @@ export interface Project {
   thumbnail_path: string | null
   status: ProjectStatus
   storage_mode: StorageMode
+  media_count: number
+  duration_seconds: number | null
+  size_bytes: number | null
+  has_thumbnail: boolean
 }
+
+export interface MediaAsset {
+  id: string
+  project_id: string
+  type: string
+  storage_kind: 'copied' | 'referenced'
+  original_filename: string
+  relative_path: string | null
+  duration_seconds: number | null
+  width: number | null
+  height: number | null
+  size_bytes: number | null
+  description: string | null
+  created_at: string
+}
+
+export interface ImportOptions {
+  sourcePath: string
+  copy: boolean
+  confirmLarge?: boolean
+}
+
+// Thrown when a file exceeds the size limit and needs explicit confirmation.
+export class LargeFileError extends Error {}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
@@ -41,9 +69,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore non-JSON error bodies
     }
+    if (resp.status === 409) throw new LargeFileError(detail)
     throw new Error(detail)
   }
   return resp.json() as Promise<T>
+}
+
+// The desktop shell injects this bridge; it is absent in a plain browser.
+interface PyWebviewBridge {
+  api?: { pick_video_file?: () => Promise<string | null> }
+}
+declare global {
+  interface Window {
+    pywebview?: PyWebviewBridge
+  }
+}
+
+export const desktop = {
+  isAvailable: () => Boolean(window.pywebview?.api?.pick_video_file),
+  pickVideoFile: async (): Promise<string | null> => {
+    if (!window.pywebview?.api?.pick_video_file) return null
+    return window.pywebview.api.pick_video_file()
+  },
 }
 
 export const api = {
@@ -58,4 +105,37 @@ export const api = {
     request<{ id: string; deleted: boolean }>(`/api/projects/${id}`, {
       method: 'DELETE',
     }),
+  importMedia: (projectId: string, opts: ImportOptions) =>
+    request<MediaAsset>(`/api/projects/${projectId}/media/import`, {
+      method: 'POST',
+      body: JSON.stringify({
+        source_path: opts.sourcePath,
+        copy: opts.copy,
+        confirm_large: opts.confirmLarge ?? false,
+      }),
+    }),
+  listMedia: (projectId: string) =>
+    request<MediaAsset[]>(`/api/projects/${projectId}/media`),
+  // Cache-busted so a new thumbnail shows after re-import.
+  projectThumbnailUrl: (project: Project) =>
+    `/api/projects/${project.id}/thumbnail?v=${encodeURIComponent(project.updated_at)}`,
+}
+
+export function formatDuration(seconds: number | null): string {
+  if (seconds == null) return '—:—'
+  const s = Math.floor(seconds)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
+}
+
+export function formatSize(bytes: number | null): string {
+  if (bytes == null) return '—'
+  const gb = bytes / 1024 ** 3
+  if (gb >= 1) return `${gb.toFixed(1)} GB`
+  const mb = bytes / 1024 ** 2
+  if (mb >= 1) return `${mb.toFixed(0)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
