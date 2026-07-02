@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +13,7 @@ from ..database import get_session
 from ..models import MediaAsset, Project
 from ..schemas import MediaImportRequest, MediaRead
 from ..services import media_service
+from ..utils import ffmpeg, paths
 from ..utils.ffmpeg import FFmpegError
 from .projects import _get_active_project
 
@@ -100,6 +102,49 @@ def get_media_file(media_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Media file missing")
     media_type = _VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(path, media_type=media_type, filename=asset.original_filename)
+
+
+@router.get("/api/media/{media_id}/filmstrip")
+def get_media_filmstrip(media_id: str, session: Session = Depends(get_session)):
+    """A tiled strip of frames for the clip background (generated + cached)."""
+    asset = session.get(MediaAsset, media_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+    src = Path(asset.local_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Media file missing")
+
+    dest = paths.cache_dir(asset.project_id) / f"filmstrip_{media_id}.jpg"
+    if not dest.exists():
+        try:
+            ffmpeg.generate_filmstrip(
+                src, dest, duration=asset.duration_seconds or 0.0
+            )
+        except FFmpegError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    return FileResponse(dest, media_type="image/jpeg")
+
+
+@router.get("/api/media/{media_id}/waveform")
+def get_media_waveform(media_id: str, session: Session = Depends(get_session)):
+    """Normalized audio peaks for waveform drawing (generated + cached)."""
+    asset = session.get(MediaAsset, media_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+    src = Path(asset.local_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Media file missing")
+
+    dest = paths.cache_dir(asset.project_id) / f"waveform_{media_id}.json"
+    if dest.exists():
+        return {"peaks": json.loads(dest.read_text())}
+    try:
+        peaks = ffmpeg.extract_waveform_peaks(src)
+    except FFmpegError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(peaks))
+    return {"peaks": peaks}
 
 
 @router.get("/api/projects/{project_id}/thumbnail")

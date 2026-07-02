@@ -29,3 +29,5 @@ backend/app/webui/
 # OS / editor
 .DS_Store
 *.log
+.idea/
+.vscode/

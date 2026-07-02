@@ -55,3 +55,7 @@ def transcripts_dir(project_id: str) -> Path:
 
 def renders_dir(project_id: str) -> Path:
     return project_dir(project_id) / "renders"
+
+
+def cache_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "cache"

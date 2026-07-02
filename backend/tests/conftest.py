@@ -54,6 +54,10 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
     importlib.reload(render_router)
 
+    import app.routers.timeline as timeline_router
+
+    importlib.reload(timeline_router)
+
     import app.main as main
 
     importlib.reload(main)
