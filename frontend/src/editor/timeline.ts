@@ -202,6 +202,53 @@ export function setClipColor(
   return next
 }
 
+// Generic merge of effect fields into a clip (nested objects are replaced
+// wholesale, which is what the inspector sends).
+export function updateClip(
+  data: TimelineData,
+  clipId: string,
+  patch: Partial<TimelineElement>,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  Object.assign(found.el, patch)
+  return next
+}
+
+// Add (or replace) a keyframe at clip-local time `t` capturing the given props.
+export function addKeyframe(
+  data: TimelineData,
+  clipId: string,
+  kf: import('../api/client').Keyframe,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+  const keys = found.el.keyframes ? [...found.el.keyframes] : []
+  const idx = keys.findIndex((k) => Math.abs(k.t - kf.t) < 0.01)
+  if (idx >= 0) keys[idx] = kf
+  else keys.push(kf)
+  keys.sort((a, b) => a.t - b.t)
+  found.el.keyframes = keys
+  return next
+}
+
+export function removeKeyframe(
+  data: TimelineData,
+  clipId: string,
+  t: number,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found || !found.el.keyframes) return data
+  found.el.keyframes = found.el.keyframes.filter(
+    (k) => Math.abs(k.t - t) >= 0.01,
+  )
+  if (found.el.keyframes.length === 0) delete found.el.keyframes
+  return next
+}
+
 export function setClipText(
   data: TimelineData,
   clipId: string,

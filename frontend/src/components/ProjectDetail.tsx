@@ -4,7 +4,6 @@ import {
   ConfirmationRequiredError,
   formatDuration,
   formatSize,
-  type ColorGrade,
   type Job,
   type MediaAsset,
   type Project,
@@ -14,14 +13,13 @@ import { ImportMediaModal } from './ImportMediaModal'
 import { AiChat } from './AiChat'
 import { PreviewCanvas } from '../editor/PreviewCanvas'
 import { TimelineView } from '../editor/TimelineView'
+import { Inspector } from '../editor/Inspector'
 import { useEditor } from '../editor/useEditor'
 import {
   addClip,
   makeAudioClip,
   makeTextClip,
   makeVideoClip,
-  NEUTRAL_COLOR,
-  setClipColor,
 } from '../editor/timeline'
 
 interface Props {
@@ -97,10 +95,14 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   // Auto-populate the timeline with the imported video (+ its audio).
   useEffect(() => {
     if (!editor.data || !video) return
-    const vt = editor.data.tracks.find((t) => t.kind === 'video')
+    const videoTracks = editor.data.tracks.filter((t) => t.kind === 'video')
+    const vt = videoTracks[videoTracks.length - 1]
     const at = editor.data.tracks.find((t) => t.kind === 'audio')
     if (!vt) return
-    const hasClip = vt.elements.some((e) => e.media_id === video.id)
+    // Already placed on any video track? (avoids duplicating on multi-track edits)
+    const hasClip = videoTracks.some((t) =>
+      t.elements.some((e) => e.media_id === video.id),
+    )
     if (hasClip) return
     const dur = video.duration_seconds ?? 0
     editor.commit((d) => {
@@ -239,14 +241,6 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         .find((e) => e.id === editor.selectedId)
     : undefined
 
-  const setColor = (patch: Partial<ColorGrade>) => {
-    if (!editor.selectedId) return
-    const base = selectedClip?.color ?? NEUTRAL_COLOR
-    editor.commit((d) =>
-      setClipColor(d, editor.selectedId as string, { ...base, ...patch }),
-    )
-  }
-
   if (loading) return <div className="editor-loading">Loading…</div>
   if (!project)
     return <div className="editor-loading error">{error ?? 'Not found'}</div>
@@ -333,49 +327,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
             <div className="editor-loading">Loading timeline…</div>
           )}
 
-          {selectedClip && selectedClip.type === 'video' && (
-            <div className="inspector">
-              <span className="insp-title">Color</span>
-              <label>
-                Brightness
-                <input
-                  type="range"
-                  min="0.2"
-                  max="2"
-                  step="0.05"
-                  value={selectedClip.color?.brightness ?? 1}
-                  onChange={(e) => setColor({ brightness: +e.target.value })}
-                />
-              </label>
-              <label>
-                Contrast
-                <input
-                  type="range"
-                  min="0.2"
-                  max="2"
-                  step="0.05"
-                  value={selectedClip.color?.contrast ?? 1}
-                  onChange={(e) => setColor({ contrast: +e.target.value })}
-                />
-              </label>
-              <label>
-                Saturation
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value={selectedClip.color?.saturation ?? 1}
-                  onChange={(e) => setColor({ saturation: +e.target.value })}
-                />
-              </label>
-              <button
-                className="btn small"
-                onClick={() => setColor({ ...NEUTRAL_COLOR })}
-              >
-                Reset
-              </button>
-            </div>
+          {selectedClip && (
+            <Inspector
+              clip={selectedClip}
+              editor={editor}
+              playhead={editor.playhead}
+            />
           )}
         </div>
 

@@ -157,9 +157,26 @@ pytest -q
   zoom round it out.
 - Importing a video auto-populates the timeline (a video clip plus its audio),
   and transcription drops the captions onto the text track as subtitle blocks.
-- **Starter effect** — a per-clip color grade (brightness / contrast /
-  saturation) proves the effects pipeline; the clip data model reserves room for
-  the advanced effects listed in the roadmap.
+
+## Effects (compositor)
+
+Each clip carries an effect stack applied live by the compositor (and reflected
+in a per-clip **inspector**). Everything is undoable and autosaves.
+
+- **Color grade** — brightness / contrast / saturation.
+- **Transform** — scale, position (x/y), and rotation, e.g. picture-in-picture.
+- **Opacity + transitions** — per-clip opacity plus fade in / fade out; placing a
+  clip on a higher track with a fade gives a crossfade.
+- **Keyframe animation** — keyframe opacity / scale / position / rotation over a
+  clip's timeline and the compositor interpolates between them.
+- **Green screen (chroma key)** — key out a color so the track beneath shows
+  through, with adjustable similarity and edge smoothness.
+- **Masking** — a rectangular reveal region.
+- **Audio mixing** — per-clip volume and audio fades, on top of per-track mute.
+
+Still to come: **motion tracking** (a computer-vision feature of its own) and
+**baking effects into the exported MP4** — today effects are live in the preview,
+while the render still exports the video-track cut (see roadmap).
 
 ## AI edit (cut planning)
 
@@ -190,14 +207,15 @@ pytest -q
 
 ## Roadmap (next)
 
-1. **Advanced effects** on top of the compositor — transitions (crossfades),
-   keyframe animation, masking, green screen (chroma key), advanced audio mixing,
-   and eventually motion tracking. The per-clip color grade already in place is
-   the first of these.
-2. **Burn effects into the render** — extend the FFmpeg pipeline so text
-   overlays, color grades, and effects appear in the exported MP4, not just the
-   live preview.
-3. **Asset descriptions** and, much later, an optional online sync layer.
+1. **Bake effects into the render** — extend the FFmpeg pipeline so text
+   overlays, color grades, transforms, keyframes, chroma key, and fades appear in
+   the exported MP4, not just the live preview.
+2. **Track management UI** — add / remove / reorder tracks and drop imported
+   assets onto any track from the editor (today a video import auto-populates the
+   main video + audio tracks).
+3. **Motion tracking** — the remaining advanced effect; a computer-vision effort
+   of its own.
+4. **Asset descriptions** and, much later, an optional online sync layer.
 
 ## Safety guarantees
 
