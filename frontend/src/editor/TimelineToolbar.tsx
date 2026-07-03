@@ -1,3 +1,4 @@
+import type { TrackKind } from '../api/client'
 import type { EditorState } from './useEditor'
 
 interface Props {
@@ -5,8 +6,12 @@ interface Props {
   onSplit: () => void
   onDelete: () => void
   onAddText: () => void
+  onAddTrack: (kind: TrackKind) => void
+  onMoveTrack: (dir: -1 | 1) => void
+  onRemoveTrack: () => void
   canSplit: boolean
   canDelete: boolean
+  hasSelectedTrack: boolean
 }
 
 export function TimelineToolbar({
@@ -14,8 +19,12 @@ export function TimelineToolbar({
   onSplit,
   onDelete,
   onAddText,
+  onAddTrack,
+  onMoveTrack,
+  onRemoveTrack,
   canSplit,
   canDelete,
+  hasSelectedTrack,
 }: Props) {
   const zoom = (factor: number) =>
     editor.setPxPerSec((p) => Math.min(600, Math.max(20, p * factor)))
@@ -25,7 +34,7 @@ export function TimelineToolbar({
       <button className="tbtn" onClick={onSplit} disabled={!canSplit} title="Split at playhead (S)">
         ✂ Split
       </button>
-      <button className="tbtn" onClick={onDelete} disabled={!canDelete} title="Delete (Del)">
+      <button className="tbtn" onClick={onDelete} disabled={!canDelete} title="Delete clip (Del)">
         🗑 Delete
       </button>
       <div className="tbar-sep" />
@@ -38,6 +47,31 @@ export function TimelineToolbar({
       <div className="tbar-sep" />
       <button className="tbtn" onClick={onAddText} title="Add a text clip at the playhead">
         + Text
+      </button>
+      <select
+        className="tbtn tbar-select"
+        value=""
+        title="Add a new track"
+        onChange={(e) => {
+          if (e.target.value) {
+            onAddTrack(e.target.value as TrackKind)
+            e.target.value = ''
+          }
+        }}
+      >
+        <option value="">+ Track…</option>
+        <option value="video">Video track</option>
+        <option value="audio">Audio track</option>
+        <option value="text">Text track</option>
+      </select>
+      <button className="tbtn" onClick={() => onMoveTrack(-1)} disabled={!hasSelectedTrack} title="Move track up (composites on top)">
+        ↑
+      </button>
+      <button className="tbtn" onClick={() => onMoveTrack(1)} disabled={!hasSelectedTrack} title="Move track down">
+        ↓
+      </button>
+      <button className="tbtn" onClick={onRemoveTrack} disabled={!hasSelectedTrack} title="Remove selected track">
+        ⌫ Track
       </button>
       <div className="tbar-spacer" />
       <span className="tbar-label">Zoom</span>

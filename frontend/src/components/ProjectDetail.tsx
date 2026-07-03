@@ -17,6 +17,7 @@ import { Inspector } from '../editor/Inspector'
 import { useEditor } from '../editor/useEditor'
 import {
   addClip,
+  addTrack,
   makeAudioClip,
   makeTextClip,
   makeVideoClip,
@@ -34,6 +35,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
+  const [showAssets, setShowAssets] = useState(false)
 
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [job, setJob] = useState<Job | null>(null)
@@ -241,6 +243,33 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         .find((e) => e.id === editor.selectedId)
     : undefined
 
+  const assets = media.filter((m) => m.type !== 'export')
+
+  // Drop a clip for an imported asset onto a compatible track at the playhead.
+  const placeAsset = (m: MediaAsset) => {
+    const kind: 'video' | 'audio' = m.type === 'audio' ? 'audio' : 'video'
+    editor.commit((d) => {
+      let data = d
+      const sel = data.tracks.find((t) => t.id === editor.selectedTrackId)
+      let track = sel && sel.kind === kind ? sel : undefined
+      if (!track) {
+        const ofKind = data.tracks.filter((t) => t.kind === kind)
+        track = ofKind[ofKind.length - 1]
+      }
+      if (!track) {
+        data = addTrack(data, kind, 0)
+        track = data.tracks[0]
+      }
+      const dur = m.duration_seconds ?? 5
+      const el =
+        kind === 'video'
+          ? makeVideoClip(m.id, dur, editor.playhead)
+          : makeAudioClip(m.id, dur, editor.playhead)
+      return addClip(data, track.id, el)
+    })
+    setShowAssets(false)
+  }
+
   if (loading) return <div className="editor-loading">Loading…</div>
   if (!project)
     return <div className="editor-loading error">{error ?? 'Not found'}</div>
@@ -265,6 +294,14 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         <div className="topbar-actions">
           <button className="btn small" onClick={() => setShowImport(true)}>
             + Import
+          </button>
+          <button
+            className="btn small"
+            onClick={() => setShowAssets((s) => !s)}
+            disabled={assets.length === 0}
+            title="Place an imported clip on a track"
+          >
+            🎬 Assets ({assets.length})
           </button>
           <button
             className="btn small"
@@ -295,6 +332,24 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           ))}
         </div>
       </div>
+
+      {showAssets && (
+        <div className="assets-pop">
+          <div className="assets-head">
+            Assets — click to add at playhead
+            {editor.selectedTrackId && <span className="assets-hint"> → selected track</span>}
+          </div>
+          <div className="assets-list">
+            {assets.map((m) => (
+              <button key={m.id} className="asset-item" onClick={() => placeAsset(m)}>
+                <span className="asset-kind">{m.type === 'audio' ? '🔊' : '🎞'}</span>
+                <span className="asset-name">{m.original_filename}</span>
+                <span className="asset-dur">{formatDuration(m.duration_seconds)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(txError || renderError || needConfirmLong) && (
         <div className="editor-alerts">

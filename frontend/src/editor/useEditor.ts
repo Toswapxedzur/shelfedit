@@ -11,6 +11,7 @@ import { api, type TimelineData } from '../api/client'
 export function useEditor(projectId: string) {
   const [data, setData] = useState<TimelineData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null)
   const [playhead, setPlayhead] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [pxPerSec, setPxPerSec] = useState(90)
@@ -117,6 +118,8 @@ export function useEditor(projectId: string) {
     setData,
     selectedId,
     setSelectedId,
+    selectedTrackId,
+    setSelectedTrackId,
     playhead,
     setPlayhead,
     playing,
