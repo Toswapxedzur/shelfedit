@@ -1052,33 +1052,132 @@
 
 .inspector {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 190px;
-  background: rgba(20, 23, 30, 0.92);
+  top: 10px;
+  right: 10px;
+  width: 224px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  background: rgba(20, 23, 30, 0.94);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   font-size: 12px;
   backdrop-filter: blur(6px);
+}
+.insp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.insp-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.insp-name {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.inspector section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 .insp-title {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
-.inspector label {
+.insp-field {
   display: flex;
   flex-direction: column;
   gap: 3px;
   color: var(--text-dim);
 }
+.insp-field-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insp-field-val {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 .inspector input[type='range'] {
   width: 100%;
+}
+.inspector input[type='number'] {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.inspector input[type='color'] {
+  width: 100%;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.insp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+.mini-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+.mini-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+.insp-empty {
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.kf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.kf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
 }
 
 .side {
