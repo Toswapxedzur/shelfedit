@@ -128,17 +128,23 @@ export function PreviewCanvas({
     return b
   }, [])
 
-  // The frame to composite for a source: its retained buffer. Kept fresh from
-  // requestVideoFrameCallback during playback; here we also blit on demand when
-  // paused/seeking (or when rVFC is unavailable). Returns null only when the
-  // source has never produced a frame (initial load) — the one time black is ok.
+  // The frame to composite for a source: its retained buffer. We refresh the
+  // buffer from the live element whenever it has a frame ready, so the picture
+  // tracks playback every composited frame. If the element is momentarily not
+  // ready (mid-seek, buffering) we keep the previous buffer instead of going
+  // black. Returns null only when the source has never produced a frame.
+  //
+  // NB: we intentionally copy here rather than relying solely on
+  // requestVideoFrameCallback — the source elements live in a display:none pool,
+  // and browsers stop presenting frames (so rVFC stops firing) for non-rendered
+  // videos. rVFC still runs as a bonus refresh; this copy is what guarantees the
+  // buffer never freezes while the playhead advances.
   const frameSource = useCallback(
     (key: string, v: HTMLVideoElement | undefined): HTMLCanvasElement | null => {
       const canBlit = !!v && v.readyState >= 2 && !!v.videoWidth
-      if (canBlit && (!RVFC_SUPPORTED || !playingRef.current)) blitToBuf(key, v!)
+      if (canBlit) return blitToBuf(key, v!)
       const b = frameBufRef.current.get(key)
       if (b && bufPaintedRef.current.has(key)) return b
-      if (canBlit) return blitToBuf(key, v!)
       return null
     },
     [blitToBuf],
