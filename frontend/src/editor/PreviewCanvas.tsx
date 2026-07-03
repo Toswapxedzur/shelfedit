@@ -319,6 +319,7 @@ export function PreviewCanvas({
     }
     let raf = 0
     let last: number | null = null
+    let lastPrimaryId: string | null = null
 
     // Make the active videos play, pause the rest, assign audio, and return the
     // one video whose clock drives the playhead ("primary"). A video is seeked
@@ -368,29 +369,41 @@ export function PreviewCanvas({
     const step = (ts: number) => {
       if (!playingRef.current) return
       if (last == null) last = ts
-      const dt = (ts - last) / 1000
+      let dt = (ts - last) / 1000
       last = ts
+      // Cap dt so a throttled frame (window blurred, GC, etc.) can't teleport
+      // the playhead; any real catch-up is handled by the resync below.
+      if (dt > 0.25) dt = 0.25
 
       const prev = playheadRef.current
       const primary = syncForPlayback(prev)
 
-      // The playhead is slaved to the primary video's own clock so the frame,
-      // audio and playhead stay locked. Critically, wall-clock time is used ONLY
-      // when there's no active video (a black gap) — never as a fallback while a
-      // video is buffering — otherwise it would run ahead of the video and the
-      // old code would seek forever trying to catch up. If the primary isn't
-      // ready yet we simply hold, and it resumes on its own once it buffers.
-      let t: number
-      if (primary && primary.v.readyState >= 2 && !primary.v.seeking) {
+      // Genlock: advance the playhead by wall-clock time each frame so it moves
+      // smoothly at the full redraw rate, then gently ease it toward the primary
+      // video's real time so the frame, audio and playhead stay locked without
+      // the visible stepping you'd get by snapping straight to currentTime
+      // (which the browser only updates a few times per second). Big gaps (a
+      // stall recovering, or a fresh clip taking over) are snapped instead of
+      // eased. Wall-clock alone is used only across black gaps (no video).
+      let t = prev + dt
+      const ready = primary && primary.v.readyState >= 2 && !primary.v.seeking
+      if (primary && ready) {
         const vt =
           primary.el.timeline_start +
           (primary.v.currentTime - (primary.el.source_start ?? 0))
-        t = isFinite(vt) ? vt : prev
+        if (isFinite(vt)) {
+          if (primary.el.media_id !== lastPrimaryId || Math.abs(t - vt) > 0.4) {
+            t = vt
+          } else {
+            t += (vt - t) * 0.15
+          }
+        }
       } else if (primary) {
+        // Activating / buffering: hold so we don't drift ahead of a stalled
+        // video (whose audio is stalled too, keeping everything in sync).
         t = prev
-      } else {
-        t = prev + dt
       }
+      lastPrimaryId = primary ? (primary.el.media_id as string) : null
 
       if (t >= durationRef.current) {
         t = durationRef.current
