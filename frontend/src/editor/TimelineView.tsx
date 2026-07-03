@@ -5,12 +5,16 @@ import { TimelineToolbar } from './TimelineToolbar'
 import { formatTimecode } from './format'
 import {
   addClip,
+  addTrack,
   clipDuration,
   deleteClip,
   makeTextClip,
+  moveTrack,
+  removeTrack,
   setTrackMuted,
   splitClip,
 } from './timeline'
+import type { TrackKind } from '../api/client'
 import type { EditorState } from './useEditor'
 
 const LEFT_COL = 132
@@ -77,9 +81,28 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
     }
   }
   const doAddText = () => {
-    const textTrack = data.tracks.find((t) => t.kind === 'text')
+    const sel = data.tracks.find((t) => t.id === editor.selectedTrackId)
+    const textTrack = sel && sel.kind === 'text' ? sel : data.tracks.find((t) => t.kind === 'text')
     if (!textTrack) return
     editor.commit((d) => addClip(d, textTrack.id, makeTextClip('New text', playhead)))
+  }
+
+  const doAddTrack = (kind: TrackKind) => {
+    editor.commit((d) => addTrack(d, kind, 0))
+  }
+  const doMoveTrack = (dir: -1 | 1) => {
+    if (editor.selectedTrackId)
+      editor.commit((d) => moveTrack(d, editor.selectedTrackId as string, dir))
+  }
+  const doRemoveTrack = () => {
+    if (!editor.selectedTrackId) return
+    const tr = data.tracks.find((t) => t.id === editor.selectedTrackId)
+    if (tr && tr.elements.length > 0) {
+      if (!window.confirm(`Remove track "${tr.name}" and its ${tr.elements.length} clip(s)?`))
+        return
+    }
+    editor.commit((d) => removeTrack(d, editor.selectedTrackId as string))
+    editor.setSelectedTrackId(null)
   }
 
   // Ruler ticks.
@@ -94,8 +117,12 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
         onSplit={doSplit}
         onDelete={doDelete}
         onAddText={doAddText}
+        onAddTrack={doAddTrack}
+        onMoveTrack={doMoveTrack}
+        onRemoveTrack={doRemoveTrack}
         canSplit={canSplit}
         canDelete={!!selectedId}
+        hasSelectedTrack={!!editor.selectedTrackId}
       />
 
       <div className="tl-scroll">
@@ -126,8 +153,17 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
 
           {/* Tracks */}
           {data.tracks.map((track) => (
-            <div className={`tl-track-row kind-${track.kind}`} key={track.id}>
-              <div className="tl-ctrl">
+            <div
+              className={`tl-track-row kind-${track.kind} ${track.id === editor.selectedTrackId ? 'sel' : ''}`}
+              key={track.id}
+            >
+              <div
+                className="tl-ctrl"
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  editor.setSelectedTrackId(track.id)
+                }}
+              >
                 <span className={`track-kind ${track.kind}`}>
                   {track.kind === 'video'
                     ? '🎞'
