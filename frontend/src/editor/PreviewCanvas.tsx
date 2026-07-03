@@ -19,6 +19,14 @@ interface Props {
 const CANVAS_W = 1280
 const CANVAS_H = 720
 
+// requestVideoFrameCallback fires exactly when the decoder presents a new frame
+// (the web-standard way to keep a canvas in sync with a <video>). We use it to
+// refresh each source's frame buffer; where it's unavailable the compositor
+// falls back to blitting whenever the element is ready.
+const RVFC_SUPPORTED =
+  typeof HTMLVideoElement !== 'undefined' &&
+  'requestVideoFrameCallback' in HTMLVideoElement.prototype
+
 /**
  * Real-time compositor. Instead of playing a single file, it computes the frame
  * for the current playhead time from the timeline: it seeks the active video
@@ -52,6 +60,14 @@ export function PreviewCanvas({
   // fast pointer events arrive.
   const scrubRafRef = useRef<number | null>(null)
   const scrubTargetRef = useRef<number | null>(null)
+  // Per-source frame buffers (double buffering). Each video source blits its
+  // most recently *presented* frame into its own canvas here; the compositor
+  // always draws FROM these buffers. So when a decoder momentarily has no frame
+  // ready, we redraw the previous one instead of flashing black — the standard
+  // flicker-free pattern for canvas video compositing.
+  const frameBufRef = useRef<Map<string, HTMLCanvasElement>>(new Map())
+  const bufPaintedRef = useRef<Set<string>>(new Set())
+  const rvfcHandleRef = useRef<Map<string, number>>(new Map())
 
   const getOffscreen = () => {
     if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas')
@@ -90,6 +106,44 @@ export function PreviewCanvas({
 
   const elKey = (mediaId: string, kind: 'video' | 'audio') => `${kind}:${mediaId}`
 
+  // Copy a video element's current frame into its retained buffer (native res).
+  // Returns the buffer, or null if the element has no frame yet.
+  const blitToBuf = useCallback((key: string, v: HTMLVideoElement): HTMLCanvasElement | null => {
+    const w = v.videoWidth
+    const h = v.videoHeight
+    if (!w || !h) return null
+    let b = frameBufRef.current.get(key)
+    if (!b) {
+      b = document.createElement('canvas')
+      frameBufRef.current.set(key, b)
+    }
+    if (b.width !== w || b.height !== h) {
+      b.width = w
+      b.height = h
+    }
+    const c = b.getContext('2d')
+    if (!c) return null
+    c.drawImage(v, 0, 0, w, h)
+    bufPaintedRef.current.add(key)
+    return b
+  }, [])
+
+  // The frame to composite for a source: its retained buffer. Kept fresh from
+  // requestVideoFrameCallback during playback; here we also blit on demand when
+  // paused/seeking (or when rVFC is unavailable). Returns null only when the
+  // source has never produced a frame (initial load) — the one time black is ok.
+  const frameSource = useCallback(
+    (key: string, v: HTMLVideoElement | undefined): HTMLCanvasElement | null => {
+      const canBlit = !!v && v.readyState >= 2 && !!v.videoWidth
+      if (canBlit && (!RVFC_SUPPORTED || !playingRef.current)) blitToBuf(key, v!)
+      const b = frameBufRef.current.get(key)
+      if (b && bufPaintedRef.current.has(key)) return b
+      if (canBlit) return blitToBuf(key, v!)
+      return null
+    },
+    [blitToBuf],
+  )
+
   const getEl = useCallback(
     (mediaId: string, kind: 'video' | 'audio'): HTMLVideoElement => {
       const key = elKey(mediaId, kind)
@@ -111,10 +165,19 @@ export function PreviewCanvas({
         })
         poolRef.current?.appendChild(v)
         mediaRef.current.set(key, v)
+        // Frame-accurate buffer refresh: only video-kind elements provide frames.
+        if (kind === 'video' && RVFC_SUPPORTED) {
+          const vid = v
+          const paint = () => {
+            blitToBuf(key, vid)
+            rvfcHandleRef.current.set(key, vid.requestVideoFrameCallback(paint))
+          }
+          rvfcHandleRef.current.set(key, vid.requestVideoFrameCallback(paint))
+        }
       }
       return v
     },
-    [],
+    [blitToBuf],
   )
 
   // The active clips at a given time, across tracks (bottom→top). Video track
@@ -161,17 +224,24 @@ export function PreviewCanvas({
     const { videos, texts } = activeAt(t)
 
     // Video layers, bottom track first so upper (e.g. keyed) clips composite over.
+    // We draw each layer from its retained frame buffer, never straight from the
+    // <video>: if a decoder momentarily has no frame ready the buffer still holds
+    // the previous frame, so the layer never flashes black.
     for (const { el } of videos) {
-      const v = mediaRef.current.get(elKey(el.media_id as string, 'video'))
-      if (!v || v.readyState < 2 || !v.videoWidth) continue
+      const key = elKey(el.media_id as string, 'video')
+      const src = frameSource(key, mediaRef.current.get(key))
+      if (!src) continue
+      const sw = src.width
+      const sh = src.height
+      if (!sw || !sh) continue
       const dur = clipDuration(el)
       const lt = t - el.timeline_start
       const p = resolveProps(el, lt, dur)
       if (p.opacity <= 0.001) continue
 
-      const fit = Math.min(CANVAS_W / v.videoWidth, CANVAS_H / v.videoHeight)
-      const w = v.videoWidth * fit * p.scale
-      const h = v.videoHeight * fit * p.scale
+      const fit = Math.min(CANVAS_W / sw, CANVAS_H / sh)
+      const w = sw * fit * p.scale
+      const h = sh * fit * p.scale
       const cx = CANVAS_W / 2 + p.x * CANVAS_W
       const cy = CANVAS_H / 2 + p.y * CANVAS_H
 
@@ -193,7 +263,7 @@ export function PreviewCanvas({
       if (el.chroma?.enabled) {
         // Key on the GPU, then composite so the layer below shows through.
         const c = el.color
-        const keyed = getKeyer()?.render(v, {
+        const keyed = getKeyer()?.render(src, {
           color: el.chroma.color,
           similarity: el.chroma.similarity,
           smoothness: el.chroma.smoothness,
@@ -206,15 +276,15 @@ export function PreviewCanvas({
         } else {
           // CPU fallback (no WebGL): read back pixels and key on the main thread.
           const off = getOffscreen()
-          const dw = Math.max(1, Math.round(Math.min(v.videoWidth, 960)))
-          const dh = Math.max(1, Math.round((dw * v.videoHeight) / v.videoWidth))
+          const dw = Math.max(1, Math.round(Math.min(sw, 960)))
+          const dh = Math.max(1, Math.round((dw * sh) / sw))
           off.width = dw
           off.height = dh
           const octx = off.getContext('2d', { willReadFrequently: true })
           if (octx) {
             octx.clearRect(0, 0, dw, dh)
             octx.filter = colorFilterOf(el)
-            octx.drawImage(v, 0, 0, dw, dh)
+            octx.drawImage(src, 0, 0, dw, dh)
             octx.filter = 'none'
             try {
               const img = octx.getImageData(0, 0, dw, dh)
@@ -233,7 +303,7 @@ export function PreviewCanvas({
         }
       } else {
         ctx.filter = colorFilterOf(el)
-        ctx.drawImage(v, -w / 2, -h / 2, w, h)
+        ctx.drawImage(src, -w / 2, -h / 2, w, h)
         ctx.filter = 'none'
       }
       ctx.restore()
@@ -265,7 +335,7 @@ export function PreviewCanvas({
       ctx.fillText(el.text, 0, 0)
       ctx.restore()
     }
-  }, [activeAt])
+  }, [activeAt, frameSource])
 
   drawFrameRef.current = drawFrame
 
@@ -470,13 +540,27 @@ export function PreviewCanvas({
   // Clean up video elements on unmount.
   useEffect(() => {
     const els = mediaRef.current
+    const handles = rvfcHandleRef.current
+    const bufs = frameBufRef.current
+    const painted = bufPaintedRef.current
     return () => {
       if (scrubRafRef.current != null) cancelAnimationFrame(scrubRafRef.current)
-      for (const v of els.values()) {
+      for (const [key, v] of els) {
+        const h = handles.get(key)
+        if (h != null && typeof v.cancelVideoFrameCallback === 'function') {
+          try {
+            v.cancelVideoFrameCallback(h)
+          } catch {
+            /* ignore */
+          }
+        }
         v.pause()
         v.src = ''
       }
       els.clear()
+      handles.clear()
+      bufs.clear()
+      painted.clear()
     }
   }, [])
 
