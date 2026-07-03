@@ -75,9 +75,14 @@ export function PreviewCanvas({
   const playingRef = useRef(playing)
   const durationRef = useRef(duration)
   dataRef.current = data
-  playheadRef.current = playhead
   playingRef.current = playing
   durationRef.current = duration
+  // NB: playheadRef is deliberately NOT mirrored from the prop here. During
+  // playback / scrubbing the live time lives in this ref (updated by the step
+  // loop and the playhead subscription); the `playhead` prop is only committed
+  // on discrete events and lags on purpose. Mirroring it every render would
+  // clobber the live value with the stale prop — e.g. pausing would snap the
+  // playhead back to wherever the last commit was (0).
 
   const getVideo = useCallback((mediaId: string): HTMLVideoElement => {
     let v = videosRef.current.get(mediaId)
@@ -315,25 +320,33 @@ export function PreviewCanvas({
     let raf = 0
     let last: number | null = null
 
-    const syncForPlayback = (t: number) => {
+    // Make the active videos play, pause the rest, assign audio, and return the
+    // one video whose clock drives the playhead ("primary"). A video is seeked
+    // only when it's (re)activating (was paused) — never continuously — so it
+    // can't get stuck chasing a moving target.
+    const syncForPlayback = (t: number): { el: TimelineElement; v: HTMLVideoElement } | null => {
       const { videos } = activeAt(t)
       const activeIds = new Set(videos.map((x) => x.el.media_id))
       for (const [id, v] of videosRef.current) {
         if (!activeIds.has(id) && !v.paused) v.pause()
       }
       let audioAssigned = false
+      let primary: { el: TimelineElement; v: HTMLVideoElement } | null = null
       for (const { track, el } of videos) {
         const v = getVideo(el.media_id as string)
         const st = sourceTime(el, t)
-        if (Math.abs(v.currentTime - st) > 0.3) {
-          try {
-            v.currentTime = st
-          } catch {
-            /* ignore */
+        if (v.paused) {
+          // Just becoming active: line it up once, then let it play freely.
+          if (Math.abs(v.currentTime - st) > 0.15) {
+            try {
+              v.currentTime = st
+            } catch {
+              /* not ready yet */
+            }
           }
+          v.play().catch(() => {})
         }
-        // First active video track with sound provides audio; per-clip volume
-        // and audio fades + per-track volume shape the level.
+        // First active, unmuted track provides audio (and drives the clock).
         const wantAudio = !audioAssigned && !track.muted
         v.muted = !wantAudio
         if (wantAudio) {
@@ -341,9 +354,15 @@ export function PreviewCanvas({
           const dur = clipDuration(el)
           const lt = t - el.timeline_start
           v.volume = resolveAudioGain(el, lt, dur) * (track.volume ?? 1)
+          primary = { el, v }
         }
-        if (v.paused) v.play().catch(() => {})
       }
+      // No audio track active? Still slave the clock to the first active video.
+      if (!primary && videos.length) {
+        const { el } = videos[0]
+        primary = { el, v: getVideo(el.media_id as string) }
+      }
+      return primary
     }
 
     const step = (ts: number) => {
@@ -352,21 +371,25 @@ export function PreviewCanvas({
       const dt = (ts - last) / 1000
       last = ts
 
-      // Prefer the active video's own playback clock so the playhead, its audio
-      // and the drawn frame stay locked together — and drift never builds up, so
-      // syncForPlayback never has to issue a stutter-inducing correction seek.
-      // Falls back to wall-clock time across gaps / while a clip is still seeking.
       const prev = playheadRef.current
-      let t = prev + dt
-      for (const { el } of activeAt(prev).videos) {
-        const v = videosRef.current.get(el.media_id as string)
-        if (v && !v.paused && !v.seeking && v.readyState >= 2) {
-          const vt = el.timeline_start + (v.currentTime - (el.source_start ?? 0))
-          if (isFinite(vt) && vt >= prev - 0.05) {
-            t = vt
-            break
-          }
-        }
+      const primary = syncForPlayback(prev)
+
+      // The playhead is slaved to the primary video's own clock so the frame,
+      // audio and playhead stay locked. Critically, wall-clock time is used ONLY
+      // when there's no active video (a black gap) — never as a fallback while a
+      // video is buffering — otherwise it would run ahead of the video and the
+      // old code would seek forever trying to catch up. If the primary isn't
+      // ready yet we simply hold, and it resumes on its own once it buffers.
+      let t: number
+      if (primary && primary.v.readyState >= 2 && !primary.v.seeking) {
+        const vt =
+          primary.el.timeline_start +
+          (primary.v.currentTime - (primary.el.source_start ?? 0))
+        t = isFinite(vt) ? vt : prev
+      } else if (primary) {
+        t = prev
+      } else {
+        t = prev + dt
       }
 
       if (t >= durationRef.current) {
@@ -381,7 +404,6 @@ export function PreviewCanvas({
       playheadRef.current = t
       // Live update: moves the playhead line + timecode with no React render.
       livePlayhead(t)
-      syncForPlayback(t)
       drawFrame()
       raf = requestAnimationFrame(step)
     }
