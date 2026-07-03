@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { api, type TimelineData, type TimelineElement } from '../api/client'
 import { clipDuration, clipEnd } from './timeline'
 import { applyChromaKey, resolveAudioGain, resolveProps } from './effects'
+import { ChromaKeyer } from './chromaGL'
 import { formatTimecode } from './format'
 
 interface Props {
@@ -38,11 +39,28 @@ export function PreviewCanvas({
   const videosRef = useRef<Map<string, HTMLVideoElement>>(new Map())
   const poolRef = useRef<HTMLDivElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
+  const keyerRef = useRef<ChromaKeyer | null>(null)
+  const keyerFailedRef = useRef(false)
   const timecodeRef = useRef<HTMLSpanElement>(null)
 
   const getOffscreen = () => {
     if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas')
     return offscreenRef.current
+  }
+
+  // GPU keyer, created lazily. If WebGL isn't available we fall back to the CPU
+  // pixel loop below so green screen still works, just slower.
+  const getKeyer = (): ChromaKeyer | null => {
+    if (keyerFailedRef.current) return null
+    if (!keyerRef.current) {
+      const k = new ChromaKeyer()
+      if (!k.ok) {
+        keyerFailedRef.current = true
+        return null
+      }
+      keyerRef.current = k
+    }
+    return keyerRef.current
   }
 
   // Refs mirror props so the rAF loop always sees fresh values.
@@ -141,31 +159,45 @@ export function PreviewCanvas({
       if (p.rotation) ctx.rotate((p.rotation * Math.PI) / 180)
 
       if (el.chroma?.enabled) {
-        // Key on an offscreen buffer, then composite so the layer below shows.
-        const off = getOffscreen()
-        const dw = Math.max(1, Math.round(Math.min(v.videoWidth, 960)))
-        const dh = Math.max(1, Math.round((dw * v.videoHeight) / v.videoWidth))
-        off.width = dw
-        off.height = dh
-        const octx = off.getContext('2d', { willReadFrequently: true })
-        if (octx) {
-          octx.clearRect(0, 0, dw, dh)
-          octx.filter = colorFilterOf(el)
-          octx.drawImage(v, 0, 0, dw, dh)
-          octx.filter = 'none'
-          try {
-            const img = octx.getImageData(0, 0, dw, dh)
-            applyChromaKey(
-              img,
-              el.chroma.color,
-              el.chroma.similarity,
-              el.chroma.smoothness,
-            )
-            octx.putImageData(img, 0, 0)
-          } catch {
-            /* cross-origin or not ready */
+        // Key on the GPU, then composite so the layer below shows through.
+        const c = el.color
+        const keyed = getKeyer()?.render(v, {
+          color: el.chroma.color,
+          similarity: el.chroma.similarity,
+          smoothness: el.chroma.smoothness,
+          brightness: c?.brightness ?? 1,
+          contrast: c?.contrast ?? 1,
+          saturation: c?.saturation ?? 1,
+        })
+        if (keyed) {
+          ctx.drawImage(keyed, -w / 2, -h / 2, w, h)
+        } else {
+          // CPU fallback (no WebGL): read back pixels and key on the main thread.
+          const off = getOffscreen()
+          const dw = Math.max(1, Math.round(Math.min(v.videoWidth, 960)))
+          const dh = Math.max(1, Math.round((dw * v.videoHeight) / v.videoWidth))
+          off.width = dw
+          off.height = dh
+          const octx = off.getContext('2d', { willReadFrequently: true })
+          if (octx) {
+            octx.clearRect(0, 0, dw, dh)
+            octx.filter = colorFilterOf(el)
+            octx.drawImage(v, 0, 0, dw, dh)
+            octx.filter = 'none'
+            try {
+              const img = octx.getImageData(0, 0, dw, dh)
+              applyChromaKey(
+                img,
+                el.chroma.color,
+                el.chroma.similarity,
+                el.chroma.smoothness,
+              )
+              octx.putImageData(img, 0, 0)
+            } catch {
+              /* cross-origin or not ready */
+            }
+            ctx.drawImage(off, -w / 2, -h / 2, w, h)
           }
-          ctx.drawImage(off, -w / 2, -h / 2, w, h)
         }
       } else {
         ctx.filter = colorFilterOf(el)
