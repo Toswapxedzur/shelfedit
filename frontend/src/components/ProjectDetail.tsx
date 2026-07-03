@@ -377,6 +377,8 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
               duration={duration}
               setPlayhead={editor.setPlayhead}
               setPlaying={editor.setPlaying}
+              livePlayhead={editor.livePlayhead}
+              subscribePlayhead={editor.subscribePlayhead}
             />
           ) : (
             <div className="editor-loading">Loading timeline…</div>

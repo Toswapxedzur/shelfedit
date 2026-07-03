@@ -12,9 +12,50 @@ export function useEditor(projectId: string) {
   const [data, setData] = useState<TimelineData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null)
-  const [playhead, setPlayhead] = useState(0)
+  const [playhead, setPlayheadState] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [pxPerSec, setPxPerSec] = useState(90)
+
+  // --- Playhead channel -----------------------------------------------------
+  // The playhead moves ~60x/sec during playback and scrubbing. Writing that to
+  // React state each frame would re-render the whole editor. Instead the live
+  // time lives in a ref and is pushed to a set of subscribers (the moving
+  // playhead line, the timecode readout, the compositor) that update the DOM /
+  // canvas directly. React state (`playhead`) is only *committed* on discrete
+  // events (seek release, pause, stop) so the rest of the UI stays correct
+  // without per-frame renders.
+  const playheadRef = useRef(0)
+  const subsRef = useRef<Set<(t: number) => void>>(new Set())
+
+  const subscribePlayhead = useCallback((cb: (t: number) => void) => {
+    subsRef.current.add(cb)
+    return () => {
+      subsRef.current.delete(cb)
+    }
+  }, [])
+
+  const notifyPlayhead = useCallback((t: number) => {
+    for (const cb of subsRef.current) cb(t)
+  }, [])
+
+  // Live update: ref + subscribers only, no React render.
+  const livePlayhead = useCallback(
+    (t: number) => {
+      playheadRef.current = t
+      notifyPlayhead(t)
+    },
+    [notifyPlayhead],
+  )
+
+  // Commit: also writes React state (discrete seeks / pause / stop).
+  const setPlayhead = useCallback(
+    (t: number) => {
+      playheadRef.current = t
+      notifyPlayhead(t)
+      setPlayheadState(t)
+    },
+    [notifyPlayhead],
+  )
 
   const past = useRef<TimelineData[]>([])
   const future = useRef<TimelineData[]>([])
@@ -122,6 +163,9 @@ export function useEditor(projectId: string) {
     setSelectedTrackId,
     playhead,
     setPlayhead,
+    playheadRef,
+    livePlayhead,
+    subscribePlayhead,
     playing,
     setPlaying,
     pxPerSec,
