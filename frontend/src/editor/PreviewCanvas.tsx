@@ -42,6 +42,12 @@ export function PreviewCanvas({
   const keyerRef = useRef<ChromaKeyer | null>(null)
   const keyerFailedRef = useRef(false)
   const timecodeRef = useRef<HTMLSpanElement>(null)
+  // Stable handle to the latest drawFrame (used by video-load/seek listeners).
+  const drawFrameRef = useRef<() => void>(() => {})
+  // Scrub coalescing: at most one seek+draw per animation frame no matter how
+  // fast pointer events arrive.
+  const scrubRafRef = useRef<number | null>(null)
+  const scrubTargetRef = useRef<number | null>(null)
 
   const getOffscreen = () => {
     if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas')
@@ -82,6 +88,14 @@ export function PreviewCanvas({
       v.crossOrigin = 'anonymous'
       v.muted = true
       v.playsInline = true
+      // When a seek lands (during scrubbing) redraw the accurate frame. Cheap,
+      // and it means seekAndDraw doesn't have to attach/remove listeners per call.
+      v.addEventListener('seeked', () => {
+        if (!playingRef.current) drawFrameRef.current()
+      })
+      v.addEventListener('loadeddata', () => {
+        if (!playingRef.current) drawFrameRef.current()
+      })
       poolRef.current?.appendChild(v)
       videosRef.current.set(mediaId, v)
     }
@@ -235,27 +249,25 @@ export function PreviewCanvas({
     }
   }, [activeAt])
 
-  // Paused scrubbing: seek active videos to the frame and redraw when ready.
+  drawFrameRef.current = drawFrame
+
+  // Paused scrubbing: point active videos at the frame and draw immediately.
+  // Requesting the seek is enough — the persistent 'seeked' listener redraws
+  // the accurate frame when it lands, and the browser coalesces rapid
+  // currentTime writes into a single pending seek, so this can't pile up.
   const seekAndDraw = useCallback(
     (t: number) => {
       const { videos } = activeAt(t)
       const activeIds = new Set(videos.map((x) => x.el.media_id))
       for (const [id, v] of videosRef.current) {
-        if (!activeIds.has(id)) {
-          if (!v.paused) v.pause()
-        }
+        if (!activeIds.has(id) && !v.paused) v.pause()
       }
       for (const { el } of videos) {
         const v = getVideo(el.media_id as string)
-        v.pause()
+        if (!v.paused) v.pause()
         v.muted = true
         const st = sourceTime(el, t)
-        if (Math.abs(v.currentTime - st) > 0.05) {
-          const onSeeked = () => {
-            v.removeEventListener('seeked', onSeeked)
-            if (!playingRef.current) drawFrame()
-          }
-          v.addEventListener('seeked', onSeeked)
+        if (Math.abs(v.currentTime - st) > 0.04) {
           try {
             v.currentTime = st
           } catch {
@@ -277,7 +289,17 @@ export function PreviewCanvas({
       if (timecodeRef.current) {
         timecodeRef.current.textContent = `${formatTimecode(t)} / ${formatTimecode(durationRef.current)}`
       }
-      if (!playingRef.current) seekAndDraw(t)
+      if (playingRef.current) return
+      // Coalesce: many pointer events per frame collapse into a single seek+draw
+      // on the next frame, aimed at the latest position.
+      scrubTargetRef.current = t
+      if (scrubRafRef.current == null) {
+        scrubRafRef.current = requestAnimationFrame(() => {
+          scrubRafRef.current = null
+          const tt = scrubTargetRef.current
+          if (tt != null && !playingRef.current) seekAndDraw(tt)
+        })
+      }
     }
     return subscribePlayhead(write)
   }, [subscribePlayhead, seekAndDraw])
@@ -329,7 +351,24 @@ export function PreviewCanvas({
       if (last == null) last = ts
       const dt = (ts - last) / 1000
       last = ts
-      let t = playheadRef.current + dt
+
+      // Prefer the active video's own playback clock so the playhead, its audio
+      // and the drawn frame stay locked together — and drift never builds up, so
+      // syncForPlayback never has to issue a stutter-inducing correction seek.
+      // Falls back to wall-clock time across gaps / while a clip is still seeking.
+      const prev = playheadRef.current
+      let t = prev + dt
+      for (const { el } of activeAt(prev).videos) {
+        const v = videosRef.current.get(el.media_id as string)
+        if (v && !v.paused && !v.seeking && v.readyState >= 2) {
+          const vt = el.timeline_start + (v.currentTime - (el.source_start ?? 0))
+          if (isFinite(vt) && vt >= prev - 0.05) {
+            t = vt
+            break
+          }
+        }
+      }
+
       if (t >= durationRef.current) {
         t = durationRef.current
         playheadRef.current = t
@@ -361,6 +400,7 @@ export function PreviewCanvas({
   useEffect(() => {
     const videos = videosRef.current
     return () => {
+      if (scrubRafRef.current != null) cancelAnimationFrame(scrubRafRef.current)
       for (const v of videos.values()) {
         v.pause()
         v.src = ''
