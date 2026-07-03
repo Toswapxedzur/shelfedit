@@ -272,6 +272,55 @@ export function setTrackMuted(
   return next
 }
 
+// ---- Track operations ----
+
+export function addTrack(
+  data: TimelineData,
+  kind: TimelineTrack['kind'],
+  atIndex = 0,
+): TimelineData {
+  const next = clone(data)
+  const count = next.tracks.filter((t) => t.kind === kind).length + 1
+  const name =
+    kind === 'video' ? `Video ${count}` : kind === 'audio' ? `Audio ${count}` : `Text ${count}`
+  const track: TimelineTrack = {
+    id: newId('trk'),
+    kind,
+    name,
+    order: 0,
+    elements: [],
+  }
+  const i = Math.max(0, Math.min(atIndex, next.tracks.length))
+  next.tracks.splice(i, 0, track)
+  next.tracks.forEach((t, idx) => (t.order = idx))
+  return next
+}
+
+export function removeTrack(data: TimelineData, trackId: string): TimelineData {
+  const next = clone(data)
+  next.tracks = next.tracks.filter((t) => t.id !== trackId)
+  next.tracks.forEach((t, idx) => (t.order = idx))
+  return withDuration(next)
+}
+
+// Move a track up (-1) or down (+1) in the stack. Order = compositing layer:
+// tracks earlier in the array are drawn on top.
+export function moveTrack(
+  data: TimelineData,
+  trackId: string,
+  dir: -1 | 1,
+): TimelineData {
+  const next = clone(data)
+  const i = next.tracks.findIndex((t) => t.id === trackId)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= next.tracks.length) return data
+  const tmp = next.tracks[i]
+  next.tracks[i] = next.tracks[j]
+  next.tracks[j] = tmp
+  next.tracks.forEach((t, idx) => (t.order = idx))
+  return next
+}
+
 export function makeVideoClip(
   mediaId: string,
   duration: number,

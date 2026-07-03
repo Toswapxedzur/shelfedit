@@ -157,6 +157,13 @@ pytest -q
   zoom round it out.
 - Importing a video auto-populates the timeline (a video clip plus its audio),
   and transcription drops the captions onto the text track as subtitle blocks.
+- **Track & asset management** — add video / audio / text tracks, select a track
+  (click its control column), reorder tracks up/down (which sets compositing
+  layer order — higher tracks paint on top), and remove a track (with a confirm
+  when it still holds clips). An **Assets panel** lists every imported clip;
+  clicking one drops it onto the selected compatible track (or the last one of
+  that kind) at the playhead — so multi-track comps like green-screen overlays
+  are built entirely from the editor, no API needed.
 
 ## Effects (compositor)
 
@@ -210,12 +217,9 @@ while the render still exports the video-track cut (see roadmap).
 1. **Bake effects into the render** — extend the FFmpeg pipeline so text
    overlays, color grades, transforms, keyframes, chroma key, and fades appear in
    the exported MP4, not just the live preview.
-2. **Track management UI** — add / remove / reorder tracks and drop imported
-   assets onto any track from the editor (today a video import auto-populates the
-   main video + audio tracks).
-3. **Motion tracking** — the remaining advanced effect; a computer-vision effort
+2. **Motion tracking** — the remaining advanced effect; a computer-vision effort
    of its own.
-4. **Asset descriptions** and, much later, an optional online sync layer.
+3. **Asset descriptions** and, much later, an optional online sync layer.
 
 ## Safety guarantees
 
