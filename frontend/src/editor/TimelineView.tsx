@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import type { MediaAsset } from '../api/client'
 import { ClipView } from './ClipView'
 import { TimelineToolbar } from './TimelineToolbar'
@@ -33,29 +33,45 @@ function niceInterval(targetSeconds: number): number {
 }
 
 export function TimelineView({ editor, mediaById, duration }: Props) {
-  const { data, pxPerSec, playhead, selectedId } = editor
+  const { data, pxPerSec, playhead, selectedId, subscribePlayhead } = editor
   const rulerRef = useRef<HTMLDivElement>(null)
+  const playheadElRef = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
+  const scrubT = useRef(0)
+
+  const viewSeconds = Math.max(duration + 3, MIN_VIEW_SECONDS)
+
+  // Move the playhead line via the live channel (no re-render during playback
+  // or scrubbing). Re-subscribes when the zoom (pxPerSec) changes.
+  useEffect(() => {
+    const move = (t: number) => {
+      if (playheadElRef.current) {
+        playheadElRef.current.style.left = `${LEFT_COL + t * pxPerSec}px`
+      }
+    }
+    return subscribePlayhead(move)
+  }, [subscribePlayhead, pxPerSec])
 
   if (!data) return null
 
-  const viewSeconds = Math.max(duration + 3, MIN_VIEW_SECONDS)
   const laneWidth = viewSeconds * pxPerSec
 
-  const seekFromEvent = (clientX: number) => {
+  const seekLive = (clientX: number) => {
     const rect = rulerRef.current?.getBoundingClientRect()
     if (!rect) return
-    const t = Math.max(0, (clientX - rect.left) / pxPerSec)
-    editor.setPlaying(false)
-    editor.setPlayhead(Math.min(t, viewSeconds))
+    const t = Math.min(Math.max(0, (clientX - rect.left) / pxPerSec), viewSeconds)
+    scrubT.current = t
+    editor.livePlayhead(t)
   }
 
   const onRulerDown = (e: React.PointerEvent) => {
     scrubbing.current = true
-    seekFromEvent(e.clientX)
-    const move = (ev: PointerEvent) => scrubbing.current && seekFromEvent(ev.clientX)
+    editor.setPlaying(false)
+    seekLive(e.clientX)
+    const move = (ev: PointerEvent) => scrubbing.current && seekLive(ev.clientX)
     const up = () => {
       scrubbing.current = false
+      editor.setPlayhead(scrubT.current) // commit once at the end of the drag
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
@@ -206,6 +222,7 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
           {/* Playhead spanning ruler + tracks */}
           <div
             className="tl-playhead"
+            ref={playheadElRef}
             style={{ left: LEFT_COL + playhead * pxPerSec }}
           >
             <div className="tl-playhead-knob" />

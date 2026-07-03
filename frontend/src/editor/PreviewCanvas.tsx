@@ -11,6 +11,8 @@ interface Props {
   duration: number
   setPlayhead: (t: number) => void
   setPlaying: (p: boolean) => void
+  livePlayhead: (t: number) => void
+  subscribePlayhead: (cb: (t: number) => void) => () => void
 }
 
 const CANVAS_W = 1280
@@ -29,11 +31,14 @@ export function PreviewCanvas({
   duration,
   setPlayhead,
   setPlaying,
+  livePlayhead,
+  subscribePlayhead,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videosRef = useRef<Map<string, HTMLVideoElement>>(new Map())
   const poolRef = useRef<HTMLDivElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
+  const timecodeRef = useRef<HTMLSpanElement>(null)
 
   const getOffscreen = () => {
     if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas')
@@ -231,10 +236,26 @@ export function PreviewCanvas({
     [activeAt, drawFrame, getVideo],
   )
 
+  // Live playhead channel: keep the timecode + (when paused) the frame in sync
+  // without any React re-render. The compositor draws from `playheadRef`, so we
+  // set it here too before drawing.
+  useEffect(() => {
+    const write = (t: number) => {
+      playheadRef.current = t
+      if (timecodeRef.current) {
+        timecodeRef.current.textContent = `${formatTimecode(t)} / ${formatTimecode(durationRef.current)}`
+      }
+      if (!playingRef.current) seekAndDraw(t)
+    }
+    return subscribePlayhead(write)
+  }, [subscribePlayhead, seekAndDraw])
+
   // Playback loop.
   useEffect(() => {
     if (!playing) {
       for (const v of videosRef.current.values()) if (!v.paused) v.pause()
+      // Commit the live time so discrete UI (split / inspector) stays correct.
+      setPlayhead(playheadRef.current)
       return
     }
     let raf = 0
@@ -280,14 +301,15 @@ export function PreviewCanvas({
       if (t >= durationRef.current) {
         t = durationRef.current
         playheadRef.current = t
-        setPlayhead(t)
         setPlaying(false)
+        setPlayhead(t)
         for (const v of videosRef.current.values()) v.pause()
         drawFrame()
         return
       }
       playheadRef.current = t
-      setPlayhead(t)
+      // Live update: moves the playhead line + timecode with no React render.
+      livePlayhead(t)
       syncForPlayback(t)
       drawFrame()
       raf = requestAnimationFrame(step)
@@ -297,11 +319,11 @@ export function PreviewCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing])
 
-  // Redraw when paused and the playhead or timeline changes.
+  // Redraw the current frame when the timeline changes while paused (edits).
   useEffect(() => {
-    if (!playing) seekAndDraw(playhead)
+    if (!playingRef.current) seekAndDraw(playheadRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playhead, playing, data])
+  }, [data])
 
   // Clean up video elements on unmount.
   useEffect(() => {
@@ -333,7 +355,7 @@ export function PreviewCanvas({
         <button className="btn small" onClick={() => { setPlaying(false); setPlayhead(0) }}>
           ⏮ Start
         </button>
-        <span className="timecode">
+        <span className="timecode" ref={timecodeRef}>
           {formatTimecode(playhead)} / {formatTimecode(duration)}
         </span>
       </div>
