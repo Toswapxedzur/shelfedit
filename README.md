@@ -181,9 +181,10 @@ in a per-clip **inspector**). Everything is undoable and autosaves.
 - **Masking** — a rectangular reveal region.
 - **Audio mixing** — per-clip volume and audio fades, on top of per-track mute.
 
-Still to come: **motion tracking** (a computer-vision feature of its own) and
-**baking effects into the exported MP4** — today effects are live in the preview,
-while the render still exports the video-track cut (see roadmap).
+All of these are **baked into the exported MP4** as well (see *Render & export*),
+so the export matches what you see in the preview.
+
+Still to come: **motion tracking** (a computer-vision feature of its own).
 
 ## AI edit (cut planning)
 
@@ -204,9 +205,18 @@ while the render still exports the video-track cut (see roadmap).
 ## Render & export
 
 - Use **Render** in the editor's top action bar. It runs a background FFmpeg job
-  with live progress and renders the video track of the current timeline.
-- Rendering trims the kept segments and concatenates them in one re-encode pass,
-  keeping audio in sync. The source file is only read, never modified.
+  with live progress.
+- The render **bakes the whole timeline** into one 1280×720 re-encode pass,
+  reproducing the compositor: a black canvas, video tracks layered bottom-first,
+  each clip trimmed and placed with its transform, color grade, opacity, fades,
+  green-screen key and mask; text overlays painted on top; and audio taken from
+  the bottom-most non-muted video track with per-clip volume and fades. The
+  export therefore matches the preview. Sources are only read, never modified.
+  - Built as a single FFmpeg `filter_complex` (`overlay` / `colorkey` / `eq` /
+    `rotate` / `fade` / `amix`). Text is rasterized to transparent PNGs with
+    Pillow because some FFmpeg builds ship without `drawtext`.
+  - Keyframed **fades** are exact; keyframed **scale / position / rotation** are
+    sampled once (at the clip midpoint) rather than smoothly animated.
 - Exports are written to versioned filenames (`export_v1.mp4`, `export_v2.mp4`,
   …) so a render never overwrites a previous one.
 - Finished exports appear as download links in the top action bar. The project
@@ -214,9 +224,8 @@ while the render still exports the video-track cut (see roadmap).
 
 ## Roadmap (next)
 
-1. **Bake effects into the render** — extend the FFmpeg pipeline so text
-   overlays, color grades, transforms, keyframes, chroma key, and fades appear in
-   the exported MP4, not just the live preview.
+1. **Smoothly animated transforms in export** — bake keyframed scale / position /
+   rotation frame-accurately (today they're sampled once per clip).
 2. **Motion tracking** — the remaining advanced effect; a computer-vision effort
    of its own.
 3. **Asset descriptions** and, much later, an optional online sync layer.

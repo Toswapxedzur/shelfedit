@@ -189,6 +189,51 @@ def start_transcription_job(job_id: str) -> None:
     threading.Thread(target=_run_transcription, args=(job_id,), daemon=True).start()
 
 
+def _referenced_media_ids(data: dict) -> set[str]:
+    ids: set[str] = set()
+    for track in data.get("tracks", []):
+        for el in track.get("elements", []):
+            mid = el.get("media_id")
+            if mid:
+                ids.add(mid)
+    return ids
+
+
+def _has_text(data: dict) -> bool:
+    for track in data.get("tracks", []):
+        if track.get("kind") == "text":
+            for el in track.get("elements", []):
+                if (el.get("text") or "").strip():
+                    return True
+    return False
+
+
+def _build_media_map(
+    session: Session, project_id: str, data: dict
+) -> dict[str, render_service.MediaInfo]:
+    """Resolve every media_id referenced by the timeline to path + probe info."""
+    media_map: dict[str, render_service.MediaInfo] = {}
+    for mid in _referenced_media_ids(data):
+        asset = session.get(MediaAsset, mid)
+        if asset is None or asset.project_id != project_id:
+            continue
+        path = Path(asset.local_path)
+        if not path.exists():
+            continue
+        has_audio = False
+        try:
+            has_audio = ffmpeg.has_audio_stream(path)
+        except ffmpeg.FFmpegError:
+            has_audio = False
+        media_map[mid] = render_service.MediaInfo(
+            path=str(path),
+            width=asset.width,
+            height=asset.height,
+            has_audio=has_audio,
+        )
+    return media_map
+
+
 def _next_export_path(project_id: str) -> Path:
     """A fresh, versioned export filename — never overwrites an existing one."""
     rdir = paths.renders_dir(project_id)
@@ -221,17 +266,10 @@ def _run_render(job_id: str) -> None:
             return
 
         data = json.loads(timeline.data_json)
-        media_id, segments = render_service.segments_from_timeline(data)
-        if not segments or media_id is None:
+        media_map = _build_media_map(session, project.id, data)
+        if not media_map and not _has_text(data):
             _update_job(
                 session, job, status=JobStatus.error, error="Timeline has no clips"
-            )
-            return
-
-        source = session.get(MediaAsset, media_id)
-        if source is None or not Path(source.local_path).exists():
-            _update_job(
-                session, job, status=JobStatus.error, error="Source video missing"
             )
             return
 
@@ -248,9 +286,6 @@ def _run_render(job_id: str) -> None:
             session.add(project)
             session.commit()
 
-            source_path = Path(source.local_path)
-            has_audio = ffmpeg.has_audio_stream(source_path)
-            total = sum(end - start for start, end in segments)
             output_path = _next_export_path(project.id)
 
             # Throttle DB writes: only commit when progress moves a bit.
@@ -264,12 +299,10 @@ def _run_render(job_id: str) -> None:
                         session, job, progress=scaled, message="Rendering video"
                     )
 
-            render_service.render_cut_list(
-                source_path,
-                segments,
+            render_service.render_timeline(
+                data,
+                media_map,
                 output_path,
-                total,
-                has_audio=has_audio,
                 on_progress=on_progress,
             )
 
