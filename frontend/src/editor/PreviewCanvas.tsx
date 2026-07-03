@@ -36,7 +36,11 @@ export function PreviewCanvas({
   subscribePlayhead,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const videosRef = useRef<Map<string, HTMLVideoElement>>(new Map())
+  // Media elements are keyed by `${kind}:${mediaId}` so the same source file can
+  // back BOTH a silent video-frame element (video track) and an independent
+  // audible element (audio track). Video and audio are strictly split: video
+  // track elements are always muted; sound comes only from the audio track.
+  const mediaRef = useRef<Map<string, HTMLVideoElement>>(new Map())
   const poolRef = useRef<HTMLDivElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
   const keyerRef = useRef<ChromaKeyer | null>(null)
@@ -84,44 +88,53 @@ export function PreviewCanvas({
   // clobber the live value with the stale prop — e.g. pausing would snap the
   // playhead back to wherever the last commit was (0).
 
-  const getVideo = useCallback((mediaId: string): HTMLVideoElement => {
-    let v = videosRef.current.get(mediaId)
-    if (!v) {
-      v = document.createElement('video')
-      v.src = api.mediaFileUrl(mediaId)
-      v.preload = 'auto'
-      v.crossOrigin = 'anonymous'
-      v.muted = true
-      v.playsInline = true
-      // When a seek lands (during scrubbing) redraw the accurate frame. Cheap,
-      // and it means seekAndDraw doesn't have to attach/remove listeners per call.
-      v.addEventListener('seeked', () => {
-        if (!playingRef.current) drawFrameRef.current()
-      })
-      v.addEventListener('loadeddata', () => {
-        if (!playingRef.current) drawFrameRef.current()
-      })
-      poolRef.current?.appendChild(v)
-      videosRef.current.set(mediaId, v)
-    }
-    return v
-  }, [])
+  const elKey = (mediaId: string, kind: 'video' | 'audio') => `${kind}:${mediaId}`
 
-  // The active video / text clips at a given time, across tracks (bottom→top).
+  const getEl = useCallback(
+    (mediaId: string, kind: 'video' | 'audio'): HTMLVideoElement => {
+      const key = elKey(mediaId, kind)
+      let v = mediaRef.current.get(key)
+      if (!v) {
+        v = document.createElement('video')
+        v.src = api.mediaFileUrl(mediaId)
+        v.preload = 'auto'
+        v.crossOrigin = 'anonymous'
+        v.muted = true // audio-kind elements are unmuted during playback
+        v.playsInline = true
+        // When a seek lands (during scrubbing) redraw the accurate frame. Cheap,
+        // and it means seekAndDraw doesn't have to attach/remove listeners per call.
+        v.addEventListener('seeked', () => {
+          if (!playingRef.current) drawFrameRef.current()
+        })
+        v.addEventListener('loadeddata', () => {
+          if (!playingRef.current) drawFrameRef.current()
+        })
+        poolRef.current?.appendChild(v)
+        mediaRef.current.set(key, v)
+      }
+      return v
+    },
+    [],
+  )
+
+  // The active clips at a given time, across tracks (bottom→top). Video track
+  // clips provide frames; audio track clips provide sound; text clips overlay.
   const activeAt = useCallback((t: number) => {
     const d = dataRef.current
     const videos: { track: (typeof d.tracks)[number]; el: TimelineElement }[] = []
+    const audios: { track: (typeof d.tracks)[number]; el: TimelineElement }[] = []
     const texts: TimelineElement[] = []
     // tracks are ordered top→bottom in the array; draw video bottom-first.
     for (const track of [...d.tracks].reverse()) {
       for (const el of track.elements) {
         if (t >= el.timeline_start && t < clipEnd(el)) {
           if (track.kind === 'video') videos.push({ track, el })
+          else if (track.kind === 'audio') audios.push({ track, el })
           else if (track.kind === 'text') texts.push(el)
         }
       }
     }
-    return { videos, texts }
+    return { videos, audios, texts }
   }, [])
 
   const sourceTime = (el: TimelineElement, t: number) =>
@@ -149,7 +162,7 @@ export function PreviewCanvas({
 
     // Video layers, bottom track first so upper (e.g. keyed) clips composite over.
     for (const { el } of videos) {
-      const v = videosRef.current.get(el.media_id as string)
+      const v = mediaRef.current.get(elKey(el.media_id as string, 'video'))
       if (!v || v.readyState < 2 || !v.videoWidth) continue
       const dur = clipDuration(el)
       const lt = t - el.timeline_start
@@ -263,12 +276,14 @@ export function PreviewCanvas({
   const seekAndDraw = useCallback(
     (t: number) => {
       const { videos } = activeAt(t)
-      const activeIds = new Set(videos.map((x) => x.el.media_id))
-      for (const [id, v] of videosRef.current) {
-        if (!activeIds.has(id) && !v.paused) v.pause()
+      // While paused/scrubbing, only the active video-frame elements matter;
+      // pause everything else (including all audio elements — no sound on scrub).
+      const activeKeys = new Set(videos.map((x) => elKey(x.el.media_id as string, 'video')))
+      for (const [key, v] of mediaRef.current) {
+        if (!activeKeys.has(key) && !v.paused) v.pause()
       }
       for (const { el } of videos) {
-        const v = getVideo(el.media_id as string)
+        const v = getEl(el.media_id as string, 'video')
         if (!v.paused) v.pause()
         v.muted = true
         const st = sourceTime(el, t)
@@ -282,7 +297,7 @@ export function PreviewCanvas({
       }
       drawFrame()
     },
-    [activeAt, drawFrame, getVideo],
+    [activeAt, drawFrame, getEl],
   )
 
   // Live playhead channel: keep the timecode + (when paused) the frame in sync
@@ -312,7 +327,7 @@ export function PreviewCanvas({
   // Playback loop.
   useEffect(() => {
     if (!playing) {
-      for (const v of videosRef.current.values()) if (!v.paused) v.pause()
+      for (const v of mediaRef.current.values()) if (!v.paused) v.pause()
       // Commit the live time so discrete UI (split / inspector) stays correct.
       setPlayhead(playheadRef.current)
       return
@@ -321,23 +336,24 @@ export function PreviewCanvas({
     let last: number | null = null
     let lastPrimaryId: string | null = null
 
-    // Make the active videos play, pause the rest, assign audio, and return the
-    // one video whose clock drives the playhead ("primary"). A video is seeked
-    // only when it's (re)activating (was paused) — never continuously — so it
+    // Drive playback: video-frame elements play muted (frames only); audio-track
+    // elements carry the sound (independently mute/volume-controllable). Returns
+    // the element whose clock drives the playhead ("primary") — the first active
+    // audio element if any (audio-led sync), else the first active video. Any
+    // element is seeked only when it's (re)activating, never continuously, so it
     // can't get stuck chasing a moving target.
     const syncForPlayback = (t: number): { el: TimelineElement; v: HTMLVideoElement } | null => {
-      const { videos } = activeAt(t)
-      const activeIds = new Set(videos.map((x) => x.el.media_id))
-      for (const [id, v] of videosRef.current) {
-        if (!activeIds.has(id) && !v.paused) v.pause()
+      const { videos, audios } = activeAt(t)
+      const activeKeys = new Set<string>([
+        ...videos.map((x) => elKey(x.el.media_id as string, 'video')),
+        ...audios.map((x) => elKey(x.el.media_id as string, 'audio')),
+      ])
+      for (const [key, v] of mediaRef.current) {
+        if (!activeKeys.has(key) && !v.paused) v.pause()
       }
-      let audioAssigned = false
-      let primary: { el: TimelineElement; v: HTMLVideoElement } | null = null
-      for (const { track, el } of videos) {
-        const v = getVideo(el.media_id as string)
-        const st = sourceTime(el, t)
+
+      const activate = (v: HTMLVideoElement, st: number) => {
         if (v.paused) {
-          // Just becoming active: line it up once, then let it play freely.
           if (Math.abs(v.currentTime - st) > 0.15) {
             try {
               v.currentTime = st
@@ -347,21 +363,41 @@ export function PreviewCanvas({
           }
           v.play().catch(() => {})
         }
-        // First active, unmuted track provides audio (and drives the clock).
-        const wantAudio = !audioAssigned && !track.muted
-        v.muted = !wantAudio
-        if (wantAudio) {
-          audioAssigned = true
-          const dur = clipDuration(el)
-          const lt = t - el.timeline_start
-          v.volume = resolveAudioGain(el, lt, dur) * (track.volume ?? 1)
-          primary = { el, v }
+      }
+
+      // Video track: frames only, always silent.
+      for (const { el } of videos) {
+        const v = getEl(el.media_id as string, 'video')
+        v.muted = true
+        const st = sourceTime(el, t)
+        activate(v, st)
+        // Gentle frame realignment to the (audio-led) timeline; rare, and it
+        // seeks a muted element so there's never an audible glitch.
+        if (!v.paused && !v.seeking && Math.abs(v.currentTime - st) > 0.35) {
+          try {
+            v.currentTime = st
+          } catch {
+            /* ignore */
+          }
         }
       }
-      // No audio track active? Still slave the clock to the first active video.
+
+      // Audio track: the actual sound. Respects per-track mute + per-clip volume.
+      let primary: { el: TimelineElement; v: HTMLVideoElement } | null = null
+      for (const { track, el } of audios) {
+        const v = getEl(el.media_id as string, 'audio')
+        const st = sourceTime(el, t)
+        const dur = clipDuration(el)
+        const lt = t - el.timeline_start
+        v.muted = !!track.muted
+        v.volume = resolveAudioGain(el, lt, dur) * (track.volume ?? 1)
+        activate(v, st)
+        if (!primary) primary = { el, v }
+      }
+      // No audio active? Slave the clock to the first active (muted) video.
       if (!primary && videos.length) {
         const { el } = videos[0]
-        primary = { el, v: getVideo(el.media_id as string) }
+        primary = { el, v: getEl(el.media_id as string, 'video') }
       }
       return primary
     }
@@ -410,7 +446,7 @@ export function PreviewCanvas({
         playheadRef.current = t
         setPlaying(false)
         setPlayhead(t)
-        for (const v of videosRef.current.values()) v.pause()
+        for (const v of mediaRef.current.values()) v.pause()
         drawFrame()
         return
       }
@@ -433,14 +469,14 @@ export function PreviewCanvas({
 
   // Clean up video elements on unmount.
   useEffect(() => {
-    const videos = videosRef.current
+    const els = mediaRef.current
     return () => {
       if (scrubRafRef.current != null) cancelAnimationFrame(scrubRafRef.current)
-      for (const v of videos.values()) {
+      for (const v of els.values()) {
         v.pause()
         v.src = ''
       }
-      videos.clear()
+      els.clear()
     }
   }, [])
 
