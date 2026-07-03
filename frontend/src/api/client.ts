@@ -109,6 +109,41 @@ export interface ColorGrade {
   saturation: number // 1 = normal
 }
 
+// Spatial transform applied when compositing a clip onto the frame.
+export interface Transform {
+  scale: number // 1 = fit
+  x: number // horizontal offset, fraction of frame width (-1..1)
+  y: number // vertical offset, fraction of frame height (-1..1)
+  rotation: number // degrees
+}
+
+// Green-screen / chroma key.
+export interface ChromaKey {
+  enabled: boolean
+  color: string // "#rrggbb" key color
+  similarity: number // 0..1 how close a pixel must be to be keyed
+  smoothness: number // 0..1 feather at the edge
+}
+
+// Rectangular reveal mask (fractions of the frame, 0..1).
+export interface MaskRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+// One animation keyframe at clip-local time `t` (seconds). Any subset of the
+// animatable properties may be present.
+export interface Keyframe {
+  t: number
+  opacity?: number
+  scale?: number
+  x?: number
+  y?: number
+  rotation?: number
+}
+
 export interface TimelineElement {
   id: string
   type: 'video' | 'audio' | 'text'
@@ -121,8 +156,19 @@ export interface TimelineElement {
   timeline_end?: number
   // Text clip payload.
   text?: string
-  // Per-clip effects (starter set; more added later).
+  // ---- Per-clip effects ----
   color?: ColorGrade
+  opacity?: number // 0..1, default 1
+  transform?: Transform
+  fadeIn?: number // seconds, dissolve from black / fade opacity in
+  fadeOut?: number // seconds
+  chroma?: ChromaKey
+  mask?: MaskRect | null
+  keyframes?: Keyframe[]
+  // Audio mixing (video + audio clips).
+  volume?: number // 0..1, default 1
+  audioFadeIn?: number // seconds
+  audioFadeOut?: number // seconds
 }
 
 export type TrackKind = 'video' | 'audio' | 'text'
