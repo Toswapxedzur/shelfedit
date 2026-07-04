@@ -274,6 +274,10 @@ def generate_proxy(
         "2",
         "-movflags",
         "+faststart",
+        # The temp file ends in .part, so ffmpeg can't infer the container from
+        # the extension — state it explicitly.
+        "-f",
+        "mp4",
         str(tmp),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)

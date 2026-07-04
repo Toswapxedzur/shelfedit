@@ -24,9 +24,7 @@ import {
   Input,
   UrlSource,
   ALL_FORMATS,
-  CanvasSink,
   AudioBufferSink,
-  type InputVideoTrack,
   type InputAudioTrack,
   type WrappedAudioBuffer,
 } from 'mediabunny'
@@ -58,18 +56,7 @@ const FRAME_LEAD = 0.3 // seconds of video frames buffered ahead
 // unbounded lag — it drops frames instead of playing in slow motion.
 const CATCHUP_LAG = 0.35
 const AUDIO_LEAD = 1.0 // seconds of audio scheduled ahead
-const MAX_FRAME_DIM = 1280 // cap decode resolution to the compositor size
 const PUMP_MS = 40 // engine housekeeping tick
-// Reuse decoded-frame canvases in a ring instead of allocating one per frame
-// (avoids GC hitches at 30-60fps). Must comfortably exceed the number of frames
-// held at once (queue within FRAME_LEAD + the one on screen), or the ring would
-// overwrite a frame we still need. 48 covers 0.3s even at 120fps.
-// Pool size for the mediabunny CanvasSink. Because we IMMEDIATELY copy every
-// decoded frame out of the pool into an ImageBitmap we own (see the producer),
-// the sink only ever needs a couple of live canvases at a time. Copying out is
-// what real WebCodecs editors do so the pooled/hardware output never starves
-// and a frame we're still displaying is never recycled underneath us.
-const FRAME_POOL = 6
 
 const EMPTY_DATA: TimelineData = { tracks: [], duration: 0 } as unknown as TimelineData
 
@@ -93,16 +80,25 @@ interface AudioProducer {
   token: CancelToken
 }
 
-// Everything we track for one physical media file (one media_id).
+// A frame delivered by the decode worker (bitmap ownership transferred to us).
+interface WorkerFrame {
+  timestamp: number
+  duration: number
+  bitmap: ImageBitmap
+}
+
+// Everything we track for one physical media file (one media_id). Video is
+// decoded in the worker; audio stays on the main thread (it defines the clock).
 interface SourceEntry {
   mediaId: string
   input: Input
   ready: Promise<void>
-  videoTrack: InputVideoTrack | null
   audioTrack: InputAudioTrack | null
-  canvasSink: CanvasSink | null
   audioSink: AudioBufferSink | null
-  // Video decode-ahead: frames we own (copied out of the decoder pool).
+  // True once the worker has opened this source and can decode video.
+  hasVideo: boolean
+  videoReady: Promise<void>
+  // Video decode-ahead: frames we own (bitmaps transferred from the worker).
   frameQueue: Frame[]
   current: Frame | null
   videoProducer: VideoProducer | null
@@ -131,8 +127,18 @@ export class PreviewEngine {
   private seekingPromise: Promise<void> | null = null
   private readonly onEnded: () => void
 
+  // Decode worker: runs demux + WebCodecs + copy-out off the main thread.
+  private worker: Worker
+  private reqSeq = 0
+  private pending = new Map<number, (f: WorkerFrame | null) => void>()
+  private videoOpen = new Map<string, (ok: boolean) => void>()
+
   constructor(onEnded: () => void) {
     this.onEnded = onEnded
+    this.worker = new Worker(new URL('./decodeWorker.ts', import.meta.url), {
+      type: 'module',
+    })
+    this.worker.onmessage = (e: MessageEvent) => this.onWorkerMessage(e.data)
   }
 
   // ---- public API --------------------------------------------------------
@@ -245,8 +251,8 @@ export class PreviewEngine {
     await Promise.all(
       videos.map(async ({ el }) => {
         const entry = this.ensureSource(el.media_id as string)
-        await entry.ready
-        if (!entry.canvasSink) return
+        await entry.videoReady
+        if (!entry.hasVideo) return
         const st = Math.max(0, sourceTimeOf(el, t))
         const cur = entry.current
         if (
@@ -257,17 +263,12 @@ export class PreviewEngine {
         ) {
           return // same frame already shown — no decode needed
         }
-        try {
-          const wc = await entry.canvasSink.getCanvas(st)
-          if (wc) {
-            const image = await createImageBitmap(wc.canvas)
-            const prev = entry.current
-            entry.current = { image, timestamp: wc.timestamp, duration: wc.duration }
-            prev?.image.close()
-            this.clearQueue(entry)
-          }
-        } catch {
-          /* not ready */
+        const f = await this.workerSeek(entry.mediaId, st)
+        if (f) {
+          const prev = entry.current
+          entry.current = { image: f.bitmap, timestamp: f.timestamp, duration: f.duration }
+          prev?.image.close()
+          this.clearQueue(entry)
         }
       }),
     )
@@ -295,6 +296,7 @@ export class PreviewEngine {
     } catch {
       /* ignore */
     }
+    this.worker.postMessage({ t: 'drop', mediaId })
     this.sources.delete(mediaId)
   }
 
@@ -343,6 +345,11 @@ export class PreviewEngine {
       }
     }
     this.sources.clear()
+    // Reject any in-flight worker requests and tear the worker down.
+    for (const resolve of this.pending.values()) resolve(null)
+    this.pending.clear()
+    this.videoOpen.clear()
+    this.worker.terminate()
     if (this.ctx) {
       void this.ctx.close()
       this.ctx = null
@@ -356,6 +363,68 @@ export class PreviewEngine {
     return this.ctx
   }
 
+  private onWorkerMessage(msg: {
+    t: string
+    mediaId?: string
+    ok?: boolean
+    reqId?: number
+    timestamp?: number
+    duration?: number
+    bitmap?: ImageBitmap
+  }): void {
+    if (msg.t === 'opened') {
+      const resolve = this.videoOpen.get(msg.mediaId as string)
+      if (resolve) {
+        this.videoOpen.delete(msg.mediaId as string)
+        resolve(!!msg.ok)
+      }
+      return
+    }
+    if (msg.t === 'frame') {
+      const resolve = this.pending.get(msg.reqId as number)
+      if (!resolve) {
+        // Late/cancelled reply — free the transferred bitmap so it doesn't leak.
+        msg.bitmap?.close()
+        return
+      }
+      this.pending.delete(msg.reqId as number)
+      resolve(
+        msg.ok && msg.bitmap
+          ? { timestamp: msg.timestamp ?? 0, duration: msg.duration ?? 0, bitmap: msg.bitmap }
+          : null,
+      )
+    }
+  }
+
+  private openWorkerVideo(mediaId: string, url: string): Promise<void> {
+    return new Promise((resolve) => {
+      this.videoOpen.set(mediaId, (ok) => {
+        const entry = this.sources.get(mediaId)
+        if (entry) entry.hasVideo = ok
+        resolve()
+      })
+      this.worker.postMessage({ t: 'open', mediaId, url })
+    })
+  }
+
+  // Pull the next decode-ahead frame from the worker's running generator.
+  private workerNext(mediaId: string): Promise<WorkerFrame | null> {
+    const reqId = ++this.reqSeq
+    return new Promise((resolve) => {
+      this.pending.set(reqId, resolve)
+      this.worker.postMessage({ t: 'next', mediaId, reqId })
+    })
+  }
+
+  // Ask the worker for the single exact frame at a source time (scrubbing).
+  private workerSeek(mediaId: string, srcTime: number): Promise<WorkerFrame | null> {
+    const reqId = ++this.reqSeq
+    return new Promise((resolve) => {
+      this.pending.set(reqId, resolve)
+      this.worker.postMessage({ t: 'seek', mediaId, srcTime, reqId })
+    })
+  }
+
   private ensureSource(mediaId: string): SourceEntry {
     let entry = this.sources.get(mediaId)
     if (entry) return entry
@@ -363,15 +432,17 @@ export class PreviewEngine {
     // falls back to the original file until then. This is what keeps heavy / VFR
     // sources smooth (they're normalized to ≤1280 CFR H.264 like a CapCut export).
     const url = new URL(api.mediaPreviewUrl(mediaId), location.origin).href
+    // Audio is decoded here (it drives the master clock); video is decoded in
+    // the worker, which opens its own handle to the same URL.
     const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS })
     entry = {
       mediaId,
       input,
       ready: Promise.resolve(),
-      videoTrack: null,
       audioTrack: null,
-      canvasSink: null,
       audioSink: null,
+      hasVideo: false,
+      videoReady: Promise.resolve(),
       frameQueue: [],
       current: null,
       videoProducer: null,
@@ -380,20 +451,13 @@ export class PreviewEngine {
       scheduled: new Set(),
     }
     entry.ready = (async () => {
-      const [vt, at] = await Promise.all([
-        input.getPrimaryVideoTrack().catch(() => null),
-        input.getPrimaryAudioTrack().catch(() => null),
-      ])
-      entry!.videoTrack = vt
+      const at = await input.getPrimaryAudioTrack().catch(() => null)
       entry!.audioTrack = at
-      if (vt && (await vt.canDecode().catch(() => false))) {
-        const width = Math.min(vt.displayWidth || MAX_FRAME_DIM, MAX_FRAME_DIM)
-        entry!.canvasSink = new CanvasSink(vt, { width, poolSize: FRAME_POOL })
-      }
       if (at && (await at.canDecode().catch(() => false))) {
         entry!.audioSink = new AudioBufferSink(at)
       }
     })()
+    entry.videoReady = this.openWorkerVideo(mediaId, url)
     this.sources.set(mediaId, entry)
     return entry
   }
@@ -470,54 +534,41 @@ export class PreviewEngine {
     const token: CancelToken = { cancelled: false }
     entry.videoProducer = { clipId: clip.id, token }
     void (async () => {
-      await entry.ready
-      if (token.cancelled || !entry.canvasSink) return
+      await entry.videoReady
+      if (token.cancelled || !entry.hasVideo) return
       this.clearQueue(entry)
-      // Outer loop: (re)open the decode generator at the current clock. If the
-      // decoder falls too far behind realtime it breaks out with `reseek` set,
-      // and we reopen at the new (later) clock — dropping the frames in between.
+      // Outer loop: (re)start the worker's decode generator at the current clock.
+      // If a delivered frame is already far behind the clock, break with `reseek`
+      // and restart at the new (later) clock — dropping the frames in between.
       // This is the drop-to-live behavior native editors use so lag can't build.
-      while (!token.cancelled && entry.canvasSink) {
+      while (!token.cancelled && entry.hasVideo) {
         const start = Math.max(0, sourceTimeOf(clip, this.currentTime()))
-        const gen = entry.canvasSink.canvases(start)
+        this.worker.postMessage({ t: 'startGen', mediaId: entry.mediaId, from: start })
         let reseek = false
-        try {
-          for await (const wc of gen) {
-            if (token.cancelled) break
-            // Drop-to-live: this frame is already well behind the clock, so the
-            // decoder isn't keeping up. Abandon the backlog and re-seek forward.
-            if (sourceTimeOf(clip, this.currentTime()) - wc.timestamp > CATCHUP_LAG) {
-              reseek = true
-              break
-            }
-            // Copy the frame OUT of mediabunny's pooled canvas into an ImageBitmap
-            // we own. The pool reuses its canvases in a ring, so a queued pooled
-            // canvas would be overwritten underneath us; the copy is what every
-            // real WebCodecs editor does to keep displayed frames stable.
-            const image = await createImageBitmap(wc.canvas)
-            if (token.cancelled) {
-              image.close()
-              break
-            }
-            entry.frameQueue.push({ image, timestamp: wc.timestamp, duration: wc.duration })
-            // Pace: don't run more than FRAME_LEAD ahead of the clock. The async
-            // generator is lazy, so pausing here also pauses decoding (which also
-            // bounds how much memory the decode-ahead queue can use).
-            for (;;) {
-              if (token.cancelled) break
-              const srcClock = sourceTimeOf(clip, this.currentTime())
-              const ahead = wc.timestamp - srcClock
-              if (ahead <= FRAME_LEAD) break
-              await sleep(Math.min(100, (ahead - FRAME_LEAD) * 1000))
-            }
+        for (;;) {
+          if (token.cancelled) break
+          const f = await this.workerNext(entry.mediaId)
+          if (token.cancelled) {
+            f?.bitmap.close()
+            break
           }
-        } catch {
-          /* decode ended / cancelled */
-        } finally {
-          try {
-            await gen.return()
-          } catch {
-            /* ignore */
+          if (!f) break // generator finished this clip's source
+          // Drop-to-live: this frame is already well behind the clock, so the
+          // decoder isn't keeping up. Abandon the backlog and re-seek forward.
+          if (sourceTimeOf(clip, this.currentTime()) - f.timestamp > CATCHUP_LAG) {
+            f.bitmap.close()
+            reseek = true
+            break
+          }
+          entry.frameQueue.push({ image: f.bitmap, timestamp: f.timestamp, duration: f.duration })
+          // Pace: don't buffer more than FRAME_LEAD ahead of the clock (also
+          // bounds decode-ahead memory). We simply stop pulling frames.
+          for (;;) {
+            if (token.cancelled) break
+            const srcClock = sourceTimeOf(clip, this.currentTime())
+            const ahead = f.timestamp - srcClock
+            if (ahead <= FRAME_LEAD) break
+            await sleep(Math.min(100, (ahead - FRAME_LEAD) * 1000))
           }
         }
         if (token.cancelled || !reseek) break
