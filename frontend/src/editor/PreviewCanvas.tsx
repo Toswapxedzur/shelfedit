@@ -108,10 +108,10 @@ type Gesture =
     }
 
 /**
- * Real-time compositor. Frames come from the playback engine (WebCodecs decode
- * with a single Web Audio master clock — see previewEngine.ts), and this file
- * composites them onto the canvas: color grade, transform, opacity/fades,
- * green-screen key, mask, then text overlays. Black where no video is active.
+ * Real-time compositor. The playback engine (see previewEngine.ts) hands us the
+ * live <video> element active at the playhead; this file composites it onto the
+ * canvas: color grade, transform, opacity/fades, green-screen key, mask, then
+ * text overlays. Black where no video is active.
  */
 export function PreviewCanvas({
   data,
@@ -179,6 +179,11 @@ export function PreviewCanvas({
   const getEngine = useCallback(() => {
     if (!engineRef.current) {
       engineRef.current = new PreviewEngine(() => onEndedRef.current())
+      // Repaint when a paused seek settles late (large backward seeks on big
+      // sources land after seekTo resolves) so the correct frame always shows.
+      engineRef.current.onSeekSettled = () => {
+        if (!playingRef.current) drawFrameRef.current()
+      }
       engineRef.current.setTimeline(dataRef.current, durationRef.current)
     }
     return engineRef.current
@@ -297,7 +302,7 @@ export function PreviewCanvas({
 
       if (el.chroma?.enabled) {
         const c = el.color
-        const keyed = getKeyer()?.render(frame, frame.width, frame.height, {
+        const keyed = getKeyer()?.render(frame.img, frame.width, frame.height, {
           color: el.chroma.color,
           similarity: el.chroma.similarity,
           smoothness: el.chroma.smoothness,
@@ -318,7 +323,7 @@ export function PreviewCanvas({
           if (octx) {
             octx.clearRect(0, 0, dw, dh)
             octx.filter = colorFilterOf(el)
-            octx.drawImage(frame, 0, 0, dw, dh)
+            octx.drawImage(frame.img, 0, 0, dw, dh)
             octx.filter = 'none'
             try {
               const img = octx.getImageData(0, 0, dw, dh)
@@ -332,7 +337,7 @@ export function PreviewCanvas({
         }
       } else {
         ctx.filter = colorFilterOf(el)
-        ctx.drawImage(frame, r.sx, r.sy, r.cw, r.ch, -r.w / 2, -r.h / 2, r.w, r.h)
+        ctx.drawImage(frame.img, r.sx, r.sy, r.cw, r.ch, -r.w / 2, -r.h / 2, r.w, r.h)
         ctx.filter = 'none'
       }
       ctx.restore()
