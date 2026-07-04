@@ -52,6 +52,11 @@ interface Frame {
 // How far ahead of the clock to decode. Bigger = more resilient to hiccups but
 // more memory / CPU spent ahead of time. These match typical editor pre-roll.
 const FRAME_LEAD = 0.3 // seconds of video frames buffered ahead
+// If a decoded frame is more than this far BEHIND the clock, the decoder can't
+// sustain realtime from here, so we abandon the backlog and re-seek forward to
+// "live" (drop-to-live). This is what keeps a heavy source from accumulating
+// unbounded lag — it drops frames instead of playing in slow motion.
+const CATCHUP_LAG = 0.35
 const AUDIO_LEAD = 1.0 // seconds of audio scheduled ahead
 const MAX_FRAME_DIM = 1280 // cap decode resolution to the compositor size
 const PUMP_MS = 40 // engine housekeeping tick
@@ -273,6 +278,26 @@ export class PreviewEngine {
     this.ensureSource(mediaId)
   }
 
+  // Forget a source so it is re-opened fresh next time. Used when its optimized
+  // proxy becomes ready: the reopened source fetches the proxy URL instead of
+  // the (heavy) original that was being decoded until now.
+  dropSource(mediaId: string): void {
+    const entry = this.sources.get(mediaId)
+    if (!entry) return
+    this.cancelVideoProducer(entry)
+    this.cancelAudioProducer(entry)
+    this.stopScheduled(entry)
+    this.clearQueue(entry)
+    entry.current?.image.close()
+    entry.current = null
+    try {
+      ;(entry.input as unknown as { dispose?: () => void }).dispose?.()
+    } catch {
+      /* ignore */
+    }
+    this.sources.delete(mediaId)
+  }
+
   // Start demuxing every media file referenced by the timeline, ahead of play.
   // This hides the cold-start latency (HTTP range fetch + demux + decoder init)
   // that otherwise freezes the first second of playback on a freshly imported
@@ -334,7 +359,10 @@ export class PreviewEngine {
   private ensureSource(mediaId: string): SourceEntry {
     let entry = this.sources.get(mediaId)
     if (entry) return entry
-    const url = new URL(api.mediaFileUrl(mediaId), location.origin).href
+    // Decode the optimized proxy when the backend has it ready; it transparently
+    // falls back to the original file until then. This is what keeps heavy / VFR
+    // sources smooth (they're normalized to ≤1280 CFR H.264 like a CapCut export).
+    const url = new URL(api.mediaPreviewUrl(mediaId), location.origin).href
     const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS })
     entry = {
       mediaId,
@@ -445,40 +473,57 @@ export class PreviewEngine {
       await entry.ready
       if (token.cancelled || !entry.canvasSink) return
       this.clearQueue(entry)
-      const start = Math.max(0, sourceTimeOf(clip, this.currentTime()))
-      const gen = entry.canvasSink.canvases(start)
-      try {
-        for await (const wc of gen) {
-          if (token.cancelled) break
-          // Copy the frame OUT of mediabunny's pooled canvas into an ImageBitmap
-          // we own. The pool reuses its canvases in a ring, so a queued pooled
-          // canvas would be overwritten underneath us; the copy is what every
-          // real WebCodecs editor does to keep displayed frames stable.
-          const image = await createImageBitmap(wc.canvas)
-          if (token.cancelled) {
-            image.close()
-            break
-          }
-          entry.frameQueue.push({ image, timestamp: wc.timestamp, duration: wc.duration })
-          // Pace: don't run more than FRAME_LEAD ahead of the clock. The async
-          // generator is lazy, so pausing here also pauses decoding (which also
-          // bounds how much memory the decode-ahead queue can use).
-          for (;;) {
-            if (token.cancelled) break
-            const srcClock = sourceTimeOf(clip, this.currentTime())
-            const ahead = wc.timestamp - srcClock
-            if (ahead <= FRAME_LEAD) break
-            await sleep(Math.min(100, (ahead - FRAME_LEAD) * 1000))
-          }
-        }
-      } catch {
-        /* decode ended / cancelled */
-      } finally {
+      // Outer loop: (re)open the decode generator at the current clock. If the
+      // decoder falls too far behind realtime it breaks out with `reseek` set,
+      // and we reopen at the new (later) clock — dropping the frames in between.
+      // This is the drop-to-live behavior native editors use so lag can't build.
+      while (!token.cancelled && entry.canvasSink) {
+        const start = Math.max(0, sourceTimeOf(clip, this.currentTime()))
+        const gen = entry.canvasSink.canvases(start)
+        let reseek = false
         try {
-          await gen.return()
+          for await (const wc of gen) {
+            if (token.cancelled) break
+            // Drop-to-live: this frame is already well behind the clock, so the
+            // decoder isn't keeping up. Abandon the backlog and re-seek forward.
+            if (sourceTimeOf(clip, this.currentTime()) - wc.timestamp > CATCHUP_LAG) {
+              reseek = true
+              break
+            }
+            // Copy the frame OUT of mediabunny's pooled canvas into an ImageBitmap
+            // we own. The pool reuses its canvases in a ring, so a queued pooled
+            // canvas would be overwritten underneath us; the copy is what every
+            // real WebCodecs editor does to keep displayed frames stable.
+            const image = await createImageBitmap(wc.canvas)
+            if (token.cancelled) {
+              image.close()
+              break
+            }
+            entry.frameQueue.push({ image, timestamp: wc.timestamp, duration: wc.duration })
+            // Pace: don't run more than FRAME_LEAD ahead of the clock. The async
+            // generator is lazy, so pausing here also pauses decoding (which also
+            // bounds how much memory the decode-ahead queue can use).
+            for (;;) {
+              if (token.cancelled) break
+              const srcClock = sourceTimeOf(clip, this.currentTime())
+              const ahead = wc.timestamp - srcClock
+              if (ahead <= FRAME_LEAD) break
+              await sleep(Math.min(100, (ahead - FRAME_LEAD) * 1000))
+            }
+          }
         } catch {
-          /* ignore */
+          /* decode ended / cancelled */
+        } finally {
+          try {
+            await gen.return()
+          } catch {
+            /* ignore */
+          }
         }
+        if (token.cancelled || !reseek) break
+        // Drop the now-stale backlog and yield before reopening at the new clock.
+        this.clearQueue(entry)
+        await sleep(16)
       }
     })()
   }

@@ -41,6 +41,15 @@ def original_media_dir(project_id: str) -> Path:
     return project_dir(project_id) / "media" / "original"
 
 
+def proxy_media_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "media" / "proxy"
+
+
+def proxy_path(project_id: str, media_id: str) -> Path:
+    """The optimized preview proxy for a media asset (H.264, CFR, downscaled)."""
+    return proxy_media_dir(project_id) / f"{media_id}.mp4"
+
+
 def thumbnails_dir(project_id: str) -> Path:
     return project_dir(project_id) / "thumbnails"
 

@@ -27,6 +27,9 @@ interface Props {
   onTransform: (clipId: string, transform: Transform) => void
   onCrop: (clipId: string, crop: MaskRect | null) => void
   onAddText: (at: number, x: number, y: number) => void
+  // media_ids whose optimized proxy is ready; when one flips ready we reopen
+  // that source so the preview switches from the original to the proxy.
+  readyProxyIds: string[]
 }
 
 const DEFAULT_CANVAS_W = 1280
@@ -125,6 +128,7 @@ export function PreviewCanvas({
   onTransform,
   onCrop,
   onAddText,
+  readyProxyIds,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
@@ -708,6 +712,24 @@ export function PreviewCanvas({
   useEffect(() => {
     if (!playingRef.current) drawFrameRef.current()
   }, [mode, selectedId])
+
+  // When a source's optimized proxy finishes generating, reopen that source so
+  // the preview swaps from decoding the heavy original to the light proxy. We
+  // only act on ids that are NEWLY ready to avoid churning live sources.
+  const prevReadyRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const now = new Set(readyProxyIds)
+    const engine = engineRef.current
+    if (engine) {
+      for (const id of now) {
+        if (!prevReadyRef.current.has(id)) engine.dropSource(id)
+      }
+      if (!playingRef.current) {
+        void engine.seekTo(playheadRef.current).then(() => drawFrameRef.current())
+      }
+    }
+    prevReadyRef.current = now
+  }, [readyProxyIds])
 
   // Diagnostics HUD (~4x/sec) sourced from the engine — no React render.
   useEffect(() => {
