@@ -31,3 +31,7 @@ backend/app/webui/
 *.log
 .idea/
 .vscode/
+
+# Rust (native rewrite)
+native/target/
+target/
