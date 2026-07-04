@@ -149,14 +149,19 @@ export class ChromaKeyer {
   }
 
   // Render the keyed frame; returns a canvas the caller can drawImage(). Null if
-  // WebGL is unavailable or the source isn't ready. The source may be a <video>
-  // or a canvas frame buffer (the compositor passes the retained buffer so a
-  // stalled decoder still keys the last good frame).
-  render(source: HTMLVideoElement | HTMLCanvasElement, opts: ChromaOpts): HTMLCanvasElement | null {
+  // WebGL is unavailable or the source isn't ready. The source may be a decoded
+  // frame canvas (from the playback engine) or a raw <video>; pass its intrinsic
+  // pixel dimensions.
+  render(
+    source: HTMLVideoElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+    srcW: number,
+    srcH: number,
+    opts: ChromaOpts,
+  ): HTMLCanvasElement | null {
     const gl = this.gl
     if (!gl || !this.ok) return null
-    let w = source instanceof HTMLVideoElement ? source.videoWidth : source.width
-    let h = source instanceof HTMLVideoElement ? source.videoHeight : source.height
+    let w = srcW
+    let h = srcH
     if (!w || !h) return null
     if (Math.max(w, h) > MAX_DIM) {
       const s = MAX_DIM / Math.max(w, h)
@@ -171,7 +176,7 @@ export class ChromaKeyer {
 
     try {
       gl.bindTexture(gl.TEXTURE_2D, this.tex)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource)
     } catch {
       return null
     }

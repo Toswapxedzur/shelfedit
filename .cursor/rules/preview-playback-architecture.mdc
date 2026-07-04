@@ -1,0 +1,66 @@
+---
+description: Locked preview-playback architecture, anti-patterns, and debug protocol for the video editor
+alwaysApply: true
+---
+
+# Preview playback architecture — LOCKED. Do not redesign.
+
+The real-time preview (`frontend/src/editor/previewEngine.ts` + `PreviewCanvas.tsx`)
+is finished and works. It mirrors how real browser NLEs work. Treat it as
+load-bearing: fix bugs *within* this design, never replace the design.
+
+## The design (this is correct — keep it)
+
+- **One master clock = the Web Audio clock.** The timeline playhead is *derived*
+  from it, so it can never freeze or "chase" video. Never seek to re-sync during
+  playback.
+- **WebCodecs decode-ahead via mediabunny.** Each source is demuxed/decoded a
+  little ahead of the clock into a queue; the compositor draws the frame whose
+  timestamp matches the clock and keeps the last one if the next isn't ready.
+- **CRITICAL INVARIANT — copy frames OUT of the pool.** mediabunny's `CanvasSink`
+  pool reuses its canvases in a ring. The producer therefore does
+  `createImageBitmap(...)` to copy every decoded frame into an `ImageBitmap` we
+  own, then `close()`s it when it leaves the queue / on pause / on dispose.
+  **Holding a pooled canvas in the queue is the bug that caused the freeze.**
+- **Audio is scheduled ahead on the Web Audio graph** (sample-accurate), and it
+  defines the master clock. Video is muted; audio/video are strictly split.
+
+## NEVER do these (they are the wrong fixes we already ruled out)
+
+- ❌ Do not store mediabunny's pooled `WrappedCanvas` in the queue or as the
+  on-screen frame. Always copy to an owned `ImageBitmap` first.
+- ❌ Do not "fix" freezes by raising `poolSize` or adding a `MAX_QUEUE` cap.
+- ❌ Do not go back to `<video>`-element playback, `playbackRate` nudging, or
+  hard-seeking to re-sync.
+- ❌ Do not drive the playhead through per-frame React state (`setState` in the
+  rAF loop). Use the ref + pub/sub (`livePlayhead` / `subscribePlayhead`).
+- ❌ Do not paper over freezes with speculative `try/catch` guards. Find the
+  cause first.
+
+## If the freeze reemerges — debug protocol
+
+1. **Read the green HUD, don't guess.** `clock=` (master clock), `play=`,
+   `ctx=`, and per-source `q<n>` (queue length) + `cur<t>` (shown frame ts).
+2. Interpret:
+   - `q` climbing into the hundreds while `cur` is frozen and `clock` keeps
+     rising → frames aren't being consumed / a pooled frame got recycled. Check
+     the copy-out invariant first.
+   - `q0` and `cur` stuck at the clock with stall events → real decode underrun
+     (source/serving/CPU), not a compositor bug.
+   - `play=N` mid-timeline → something paused the transport; check who called it.
+3. Fix the actual cause inside the locked design above.
+
+## When ANY hard problem appears, reference an existing editor — do not innovate
+
+For playback, sync, export, or any tricky media problem, first study how a real
+browser video editor on this same stack solved it, then copy their approach:
+
+- **elah** (`github.com/elahlabs/elah`) — WebCodecs + mediabunny; copy-and-close
+  frame cache, integer-frame time base, standalone playback engine.
+- **nimone/fast-video-cut** — WebCodecs player loop, `.close()` after copy,
+  async-generator seek queue.
+- **diffusionstudio/core** — mediabunny-based compositing engine (Canvas2D).
+- **mediabunny docs** (`mediabunny.dev`) — `CanvasSink` / `AudioBufferSink`
+  contracts, especially pooling semantics.
+
+We do not invent novel approaches in the video-editing core.

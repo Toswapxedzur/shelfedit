@@ -164,6 +164,13 @@ export interface TimelineElement {
   fadeOut?: number // seconds
   chroma?: ChromaKey
   mask?: MaskRect | null
+  // Source sub-rectangle to show (fractions 0..1). Absent = whole frame.
+  crop?: MaskRect | null
+  // Mirror the clip when compositing.
+  flipH?: boolean
+  flipV?: boolean
+  // Playback speed multiplier (1 = normal). Currently editorial metadata.
+  speed?: number
   keyframes?: Keyframe[]
   // Audio mixing (video + audio clips).
   volume?: number // 0..1, default 1

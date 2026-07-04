@@ -51,9 +51,36 @@ export function ClipView({
     node.style.width = `${Math.max(8, (endS - startS) * pxPerSec)}px`
   }
 
+  // Times to snap to: 0, the playhead, and every other clip edge on this track.
+  const snapCandidates = (): number[] => {
+    const cands = [0, editor.playheadRef.current]
+    for (const other of track.elements) {
+      if (other.id === el.id) continue
+      cands.push(other.timeline_start, other.timeline_start + clipDuration(other))
+    }
+    return cands
+  }
+
   const beginDrag = (mode: DragMode) => (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
+
+    // Blade mode: clicking the clip body splits it at the pointer.
+    if (mode === 'move' && editor.mode === 'blade') {
+      const rect = rootRef.current?.getBoundingClientRect()
+      if (rect) {
+        const at = el.timeline_start + (e.clientX - rect.left) / pxPerSec
+        editor.run({ type: 'split', clipId: el.id, at })
+      }
+      return
+    }
+
+    // Shift/Cmd click toggles multi-selection (no drag).
+    if (mode === 'move' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+      editor.toggleSelected(el.id)
+      return
+    }
+
     editor.setSelectedId(el.id)
     const baseStart = el.timeline_start
     const baseDur = clipDuration(el)
@@ -74,17 +101,54 @@ export function ClipView({
     const d = drag.current
     if (!d) return
     const dx = (e.clientX - d.startX) / pxPerSec
+    const thr = 8 / pxPerSec
+    const snapping = editor.snapping
     if (d.mode === 'move') {
-      const s = Math.max(0, d.baseStart + dx)
+      let s = Math.max(0, d.baseStart + dx)
+      if (snapping) {
+        const end = s + d.baseDur
+        let adj = 0
+        let bestD = thr
+        for (const c of snapCandidates()) {
+          const ds = c - s
+          if (Math.abs(ds) < bestD) {
+            bestD = Math.abs(ds)
+            adj = ds
+          }
+          const de = c - end
+          if (Math.abs(de) < bestD) {
+            bestD = Math.abs(de)
+            adj = de
+          }
+        }
+        s = Math.max(0, s + adj)
+      }
       d.lastStart = s
       d.lastEnd = s + d.baseDur
     } else if (d.mode === 'trim-start') {
-      const s = Math.min(Math.max(0, d.baseStart + dx), d.baseEnd - MIN_CLIP)
+      let s = Math.min(Math.max(0, d.baseStart + dx), d.baseEnd - MIN_CLIP)
+      if (snapping) {
+        for (const c of snapCandidates()) {
+          if (Math.abs(c - s) < thr && c < d.baseEnd - MIN_CLIP) {
+            s = Math.max(0, c)
+            break
+          }
+        }
+      }
       d.lastStart = s
       d.lastEnd = d.baseEnd
     } else {
+      let end = Math.max(d.baseStart + MIN_CLIP, d.baseEnd + dx)
+      if (snapping) {
+        for (const c of snapCandidates()) {
+          if (Math.abs(c - end) < thr && c > d.baseStart + MIN_CLIP) {
+            end = c
+            break
+          }
+        }
+      }
       d.lastStart = d.baseStart
-      d.lastEnd = Math.max(d.baseStart + MIN_CLIP, d.baseEnd + dx)
+      d.lastEnd = end
     }
     applyGeometry(d.lastStart, d.lastEnd)
   }
@@ -127,7 +191,7 @@ export function ClipView({
   return (
     <div
       ref={rootRef}
-      className={`clip kind-${track.kind} ${selected ? 'selected' : ''}`}
+      className={`clip kind-${track.kind} ${selected ? 'selected' : ''} ${editor.mode === 'blade' ? 'blade' : ''}`}
       style={{ left, width }}
       onPointerDown={beginDrag('move')}
       onDoubleClick={editText}
