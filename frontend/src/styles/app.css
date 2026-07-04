@@ -1019,6 +1019,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 .canvas-wrap {
   flex: 1;
@@ -1028,13 +1029,50 @@
   justify-content: center;
   overflow: hidden;
   background: #000;
+  position: relative;
+}
+/* Freeze diagnostics HUD (temporary). */
+.preview-hud {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  margin: 0;
+  padding: 6px 8px;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+  color: #7CFC00;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(124, 252, 0, 0.35);
+  border-radius: 6px;
+  pointer-events: none;
 }
 .canvas-wrap canvas {
   max-width: 100%;
   max-height: 100%;
 }
+/* The source <video> elements must stay *painted* (not display:none), otherwise
+   Chromium suspends their frame decoding and the compositor keeps copying the
+   same stale frame — the picture freezes while the audio clock advances. So we
+   keep them rendered but effectively invisible: a tiny, near-transparent box
+   pinned in a corner, out of the way and non-interactive. */
 .video-pool {
-  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  height: 4px;
+  overflow: hidden;
+  opacity: 0.001;
+  pointer-events: none;
+  z-index: 0;
+}
+.video-pool video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 4px;
 }
 .transport {
   display: flex;
@@ -1539,4 +1577,244 @@
   height: 12px;
   background: var(--danger);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* ---------- Mode / tool strip ---------- */
+.etool {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.etool-modes,
+.etool-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.etool-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px;
+  background: var(--border);
+}
+.etool-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 52px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1.1;
+}
+.etool-mode:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+}
+.etool-mode.active {
+  background: rgba(79, 140, 255, 0.16);
+  border-color: var(--accent, #4f8cff);
+  color: #fff;
+}
+.etool-ico {
+  font-size: 16px;
+}
+.etool-lbl {
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+.etool-act {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+.etool-act:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+}
+.etool-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.etool-act.on {
+  border-color: var(--accent, #4f8cff);
+  background: rgba(79, 140, 255, 0.16);
+}
+
+/* ---------- Docked panels + resizers ---------- */
+.dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-elevated);
+}
+.dock-inspector {
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+}
+.dock.side {
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+}
+.dock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dock-x {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+.dock-x:hover {
+  color: var(--text);
+}
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.dock-body.no-pad {
+  display: flex;
+}
+.dock-empty {
+  padding: 16px 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.dock-reopen {
+  align-self: flex-start;
+  width: 18px;
+  padding: 8px 0;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* Inspector inside its dock: strip the old floating-panel styling. */
+.dock-inspector .inspector {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 10px 12px;
+}
+
+.resize-handle {
+  position: absolute;
+  z-index: 20;
+}
+.resize-handle.right {
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.resize-handle.left {
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.resize-handle.top {
+  top: -3px;
+  left: 0;
+  height: 6px;
+  width: 100%;
+  cursor: row-resize;
+}
+.resize-handle:hover {
+  background: rgba(79, 140, 255, 0.35);
+}
+.editor-bottom {
+  position: relative;
+}
+
+/* ---------- Detached (floating) AI window ---------- */
+.floating-chat {
+  position: fixed;
+  z-index: 200;
+  height: 60vh;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.floating-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+}
+.floating-chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---------- Canvas cursors per mode ---------- */
+.stage-canvas.mode-transform {
+  cursor: move;
+}
+.stage-canvas.mode-crop {
+  cursor: crosshair;
+}
+.stage-canvas.mode-text {
+  cursor: text;
+}
+.stage-canvas.mode-blade {
+  cursor: crosshair;
+}
+.clip.blade {
+  cursor: crosshair;
+}
+.insp-inline {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 2px;
 }

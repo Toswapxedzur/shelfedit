@@ -1,0 +1,29 @@
+---
+description: Git workflow — snapshot working states, and on failure revert instead of innovating a fix
+alwaysApply: true
+---
+
+# Git workflow: snapshot & revert-on-failure
+
+## Always snapshot working states
+
+- Whenever a change is verified working (build passes and the user confirms, or a
+  feature is complete), commit it and **push to `origin/main`** so there is a
+  known-good snapshot on GitHub.
+- Use short, imperative commit messages matching the existing history
+  (e.g. "Fix preview freezing during playback").
+
+## On failure: revert, do NOT improvise a fix
+
+If something breaks (build fails, playback breaks, a feature regresses, CI fails):
+
+1. **Do not attempt a clever/novel fix.** Innovative fixes have repeatedly made
+   things worse in this project.
+2. **Revert to the last successful snapshot** — the last good commit that was
+   pushed to GitHub — and confirm the app works from that state again.
+3. Only after restoring a known-good state, investigate the real cause narrowly.
+   Prefer referencing how an existing editor solved it (see the preview-playback
+   rule) over inventing a new approach.
+
+This keeps GitHub as the source of truth for "last known good," so recovery is
+always a revert away rather than a risky forward fix.
