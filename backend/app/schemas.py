@@ -111,6 +111,8 @@ class MediaRead(BaseModel):
     # Asset-library classification: a single editable category + free-form tags.
     category: str | None = None
     tags: list[str] = []
+    # True once an optimized preview proxy exists (preview then decodes that).
+    proxy_ready: bool = False
     created_at: datetime
 
 

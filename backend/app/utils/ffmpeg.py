@@ -205,6 +205,88 @@ def extract_waveform_peaks(src: Path, buckets: int = 400) -> list[float]:
     return peaks[:buckets]
 
 
+def generate_proxy(
+    src: Path,
+    dest: Path,
+    *,
+    max_dim: int = 1280,
+    fps: int = 30,
+) -> Path:
+    """Transcode `src` into an edit-friendly preview proxy.
+
+    The proxy is what the in-app preview decodes, so it is normalized to the
+    format browsers/WebCodecs play smoothly regardless of the source (this is
+    the same idea as CapCut/Premiere/Resolve "optimized media"):
+
+      • H.264 High, 8-bit yuv420p — universally, cheaply decodable.
+      • Downscaled so the long edge is at most `max_dim` (the preview canvas is
+        ~1280 wide, so decoding anything larger is wasted work). Dimensions are
+        forced even (H.264 requirement).
+      • Constant frame rate (`-r`/CFR) — screen recordings are often VFR, which
+        upsets frame pacing; normalizing removes the jitter.
+      • Short GOP (keyframe every ~0.5s) so scrubbing/seeking is fast.
+      • +faststart so the moov atom is at the front for progressive range reads.
+      • AAC audio so the preview has sound.
+
+    The original file is never modified. Writes to a temp path and atomically
+    renames on success, so a partially-written proxy is never observed as ready.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise FFmpegError("ffmpeg not found on PATH")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fps = max(1, min(fps, 120))
+    # Scale the long edge down to max_dim (never upscale), keep aspect, force even.
+    vf = (
+        f"scale='if(gt(iw,ih),min({max_dim},iw),-2)':"
+        f"'if(gt(iw,ih),-2,min({max_dim},ih))':flags=bicubic,"
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"
+    )
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-vf",
+        vf,
+        "-r",
+        str(fps),
+        "-fps_mode",
+        "cfr",
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "high",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-g",
+        str(max(1, fps // 2)),
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        str(tmp),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not tmp.exists():
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise FFmpegError(f"proxy generation failed: {proc.stderr.strip()[-400:]}")
+    tmp.replace(dest)
+    return dest
+
+
 def generate_thumbnail(
     src: Path, dest: Path, at_seconds: float = 1.0, width: int = 640
 ) -> Path:
