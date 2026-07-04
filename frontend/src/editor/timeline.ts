@@ -177,6 +177,56 @@ export function deleteClip(data: TimelineData, clipId: string): TimelineData {
   return withDuration(next)
 }
 
+// Delete clips AND close the gaps they leave on their own track: every later
+// clip on the same track slides left by the total removed duration in front of
+// it (the standard "ripple delete" in NLEs).
+export function rippleDelete(data: TimelineData, clipIds: string[]): TimelineData {
+  const set = new Set(clipIds)
+  if (set.size === 0) return data
+  const next = clone(data)
+  for (const track of next.tracks) {
+    const removed = track.elements.filter((e) => set.has(e.id))
+    if (removed.length === 0) continue
+    const remaining = track.elements.filter((e) => !set.has(e.id))
+    for (const el of remaining) {
+      let shift = 0
+      for (const r of removed) {
+        if (clipEnd(r) <= el.timeline_start + 1e-6) shift += clipDuration(r)
+      }
+      if (shift > 0) {
+        el.timeline_start = Math.max(0, el.timeline_start - shift)
+        if (el.type === 'text' && el.timeline_end != null) el.timeline_end -= shift
+      }
+    }
+    remaining.sort((a, b) => a.timeline_start - b.timeline_start)
+    track.elements = remaining
+  }
+  return withDuration(next)
+}
+
+// Duplicate each clip, dropping the copy immediately after the original on the
+// same track.
+export function duplicateClips(data: TimelineData, clipIds: string[]): TimelineData {
+  const set = new Set(clipIds)
+  if (set.size === 0) return data
+  const next = clone(data)
+  for (const track of next.tracks) {
+    const originals = track.elements.filter((e) => set.has(e.id))
+    for (const el of originals) {
+      const copy: TimelineElement = JSON.parse(JSON.stringify(el))
+      copy.id = newId('clip')
+      const dur = clipDuration(el)
+      copy.timeline_start = clipEnd(el)
+      if (copy.type === 'text' && copy.timeline_end != null) {
+        copy.timeline_end = copy.timeline_start + dur
+      }
+      track.elements.push(copy)
+    }
+    track.elements.sort((a, b) => a.timeline_start - b.timeline_start)
+  }
+  return withDuration(next)
+}
+
 export function addClip(
   data: TimelineData,
   trackId: string,

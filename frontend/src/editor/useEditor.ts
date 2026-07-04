@@ -1,20 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type TimelineData } from '../api/client'
+import { applyCommand, type EditorCommand } from './commands'
+
+// Which interaction mode the main editor panel is in. The icon tool-strip
+// switches this; the preview panel changes its behaviour/overlays to match.
+export type EditorMode = 'select' | 'transform' | 'crop' | 'blade' | 'text'
 
 /**
  * Central editor state: the timeline document, undo/redo history, debounced
  * autosave to the backend, and transport state (playhead / playing / zoom).
  *
  * Mutations go through `commit(producer)`, where `producer` returns a new
- * TimelineData (see editor/timeline.ts for the pure operations).
+ * TimelineData (see editor/timeline.ts for the pure operations), or through
+ * `run(command)` for the shared toolbar/agent action vocabulary.
  */
 export function useEditor(projectId: string) {
   const [data, setData] = useState<TimelineData | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Multi-selection is the source of truth; `selectedId` is the primary (last)
+  // selected clip, kept for the many call sites that operate on one clip.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null)
+  const [mode, setMode] = useState<EditorMode>('select')
+  const [snapping, setSnapping] = useState(true)
   const [playhead, setPlayheadState] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [pxPerSec, setPxPerSec] = useState(90)
+
+  const selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null
+
+  // Replace the selection with a single clip (or clear it).
+  const setSelectedId = useCallback((id: string | null) => {
+    setSelectedIds(id ? [id] : [])
+  }, [])
+
+  // Add/remove a clip from the selection (Shift/Cmd-click on the timeline).
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+  }, [])
 
   // --- Playhead channel -----------------------------------------------------
   // The playhead moves ~60x/sec during playback and scrubbing. Writing that to
@@ -110,6 +134,14 @@ export function useEditor(projectId: string) {
     [scheduleSave],
   )
 
+  // Apply a command from the shared action vocabulary (toolbar + agent).
+  const run = useCallback(
+    (cmd: EditorCommand) => {
+      commit((d) => applyCommand(d, cmd))
+    },
+    [commit],
+  )
+
   const undo = useCallback(() => {
     setData((prev) => {
       if (!prev || past.current.length === 0) return prev
@@ -157,10 +189,18 @@ export function useEditor(projectId: string) {
   return {
     data,
     setData,
+    selectedIds,
+    setSelectedIds,
     selectedId,
     setSelectedId,
+    toggleSelected,
     selectedTrackId,
     setSelectedTrackId,
+    mode,
+    setMode,
+    snapping,
+    setSnapping,
+    run,
     playhead,
     setPlayhead,
     playheadRef,

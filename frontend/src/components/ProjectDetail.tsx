@@ -14,6 +14,7 @@ import { AiChat } from './AiChat'
 import { PreviewCanvas } from '../editor/PreviewCanvas'
 import { TimelineView } from '../editor/TimelineView'
 import { Inspector } from '../editor/Inspector'
+import { EditorToolbar } from '../editor/EditorToolbar'
 import { useEditor } from '../editor/useEditor'
 import {
   addClip,
@@ -50,6 +51,33 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
 
   const editor = useEditor(projectId)
   const populatedText = useRef(false)
+
+  // Resizable / dockable panel geometry.
+  const [inspectorW, setInspectorW] = useState(264)
+  const [chatW, setChatW] = useState(340)
+  const [timelineH, setTimelineH] = useState(320)
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [chatDetached, setChatDetached] = useState(false)
+  const [chatPos, setChatPos] = useState({ x: 120, y: 120 })
+
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+  // Generic pointer drag: calls back with the cumulative delta from the start.
+  const startDrag = (
+    e: React.PointerEvent,
+    onDelta: (dx: number, dy: number) => void,
+  ) => {
+    e.preventDefault()
+    const sx = e.clientX
+    const sy = e.clientY
+    const move = (ev: PointerEvent) => onDelta(ev.clientX - sx, ev.clientY - sy)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   const load = useCallback(async () => {
     try {
@@ -213,35 +241,51 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      const mod = e.metaKey || e.ctrlKey
       if (e.key === ' ') {
         e.preventDefault()
         editor.setPlaying(!editor.playing)
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && editor.selectedId) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && editor.selectedIds.length) {
         e.preventDefault()
-        editor.commit((d) => {
-          const clone = JSON.parse(JSON.stringify(d))
-          for (const t of clone.tracks)
-            t.elements = t.elements.filter(
-              (x: { id: string }) => x.id !== editor.selectedId,
-            )
-          return clone
+        editor.run({
+          type: e.shiftKey ? 'rippleDelete' : 'delete',
+          clipIds: editor.selectedIds,
         })
-        editor.setSelectedId(null)
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        editor.setSelectedIds([])
+      } else if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) editor.redo()
         else editor.undo()
+      } else if (mod && e.key.toLowerCase() === 'd' && editor.selectedIds.length) {
+        e.preventDefault()
+        editor.run({ type: 'duplicate', clipIds: editor.selectedIds })
+      } else if (!mod) {
+        // Mode hotkeys (single letters, when not typing / no modifier).
+        const map: Record<string, typeof editor.mode> = {
+          v: 'select',
+          w: 'transform',
+          c: 'crop',
+          b: 'blade',
+          x: 'text',
+        }
+        const m = map[e.key.toLowerCase()]
+        if (m) {
+          e.preventDefault()
+          editor.setMode(m)
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [editor])
 
-  const selectedClip = editor.selectedId
-    ? editor.data?.tracks
-        .flatMap((t) => t.elements)
-        .find((e) => e.id === editor.selectedId)
-    : undefined
+  // Selected clips, primary (last-selected) first so the inspector shows it.
+  const allClips = editor.data?.tracks.flatMap((t) => t.elements) ?? []
+  const clipById = new Map(allClips.map((c) => [c.id, c]))
+  const selectedClips = [...editor.selectedIds]
+    .reverse()
+    .map((id) => clipById.get(id))
+    .filter((c): c is NonNullable<typeof c> => Boolean(c))
 
   const assets = media.filter((m) => m.type !== 'export')
 
@@ -366,8 +410,41 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         </div>
       )}
 
-      {/* Middle: preview (+ inspector) and AI chat */}
+      {/* Mode / tool strip (extends the top bar) */}
+      <EditorToolbar editor={editor} />
+
+      {/* Middle: inspector (orange) | preview (purple) | AI chat (red) */}
       <div className="editor-mid">
+        {inspectorOpen && (
+          <div className="dock dock-inspector" style={{ width: inspectorW }}>
+            <div className="dock-head">
+              <span>Properties</span>
+              <button className="dock-x" title="Hide" onClick={() => setInspectorOpen(false)}>
+                ⟨
+              </button>
+            </div>
+            <div className="dock-body">
+              {selectedClips.length ? (
+                <Inspector clips={selectedClips} editor={editor} playhead={editor.playhead} />
+              ) : (
+                <div className="dock-empty">Select clip(s) to edit properties</div>
+              )}
+            </div>
+            <div
+              className="resize-handle right"
+              onPointerDown={(e) => {
+                const base = inspectorW
+                startDrag(e, (dx) => setInspectorW(clamp(base + dx, 200, 460)))
+              }}
+            />
+          </div>
+        )}
+        {!inspectorOpen && (
+          <button className="dock-reopen" title="Show properties" onClick={() => setInspectorOpen(true)}>
+            ⟩
+          </button>
+        )}
+
         <div className="stage">
           {editor.data ? (
             <PreviewCanvas
@@ -375,41 +452,100 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
               playhead={editor.playhead}
               playing={editor.playing}
               duration={duration}
+              mode={editor.mode}
+              selectedId={editor.selectedId}
               setPlayhead={editor.setPlayhead}
               setPlaying={editor.setPlaying}
               livePlayhead={editor.livePlayhead}
               subscribePlayhead={editor.subscribePlayhead}
+              onSelectClip={editor.setSelectedId}
+              onTransform={(id, transform) =>
+                editor.run({ type: 'setProps', clipIds: [id], patch: { transform } })
+              }
+              onCrop={(id, crop) =>
+                editor.run({ type: 'setProps', clipIds: [id], patch: { crop } })
+              }
+              onAddText={(at, x, y) => editor.run({ type: 'addText', at, x, y })}
             />
           ) : (
             <div className="editor-loading">Loading timeline…</div>
           )}
-
-          {selectedClip && (
-            <Inspector
-              clip={selectedClip}
-              editor={editor}
-              playhead={editor.playhead}
-            />
-          )}
         </div>
 
-        <aside className="side">
-          <AiChat
-            projectId={projectId}
-            hasTranscript={Boolean(transcript)}
-            onApplied={async () => {
-              await editor.reload()
-              await load()
-              onChanged()
-            }}
-          />
-        </aside>
+        {!chatDetached && (
+          <aside className="dock side" style={{ width: chatW }}>
+            <div
+              className="resize-handle left"
+              onPointerDown={(e) => {
+                const base = chatW
+                startDrag(e, (dx) => setChatW(clamp(base - dx, 260, 560)))
+              }}
+            />
+            <div className="dock-head">
+              <span>AI Assistant</span>
+              <button className="dock-x" title="Detach into a floating window" onClick={() => setChatDetached(true)}>
+                ⧉
+              </button>
+            </div>
+            <div className="dock-body no-pad">
+              <AiChat
+                projectId={projectId}
+                hasTranscript={Boolean(transcript)}
+                onApplied={async () => {
+                  await editor.reload()
+                  await load()
+                  onChanged()
+                }}
+              />
+            </div>
+          </aside>
+        )}
       </div>
 
-      {/* Bottom: timeline */}
-      <div className="editor-bottom">
+      {/* Bottom: timeline (green) */}
+      <div className="editor-bottom" style={{ height: timelineH }}>
+        <div
+          className="resize-handle top"
+          onPointerDown={(e) => {
+            const base = timelineH
+            startDrag(e, (_dx, dy) => setTimelineH(clamp(base - dy, 160, 640)))
+          }}
+        />
         <TimelineView editor={editor} mediaById={mediaById} duration={duration} />
       </div>
+
+      {chatDetached && (
+        <div
+          className="floating-chat"
+          style={{ left: chatPos.x, top: chatPos.y, width: chatW }}
+        >
+          <div
+            className="floating-chat-head"
+            onPointerDown={(e) => {
+              const base = { ...chatPos }
+              startDrag(e, (dx, dy) =>
+                setChatPos({ x: Math.max(0, base.x + dx), y: Math.max(0, base.y + dy) }),
+              )
+            }}
+          >
+            <span>AI Assistant</span>
+            <button className="dock-x" title="Dock back" onClick={() => setChatDetached(false)}>
+              ⤓
+            </button>
+          </div>
+          <div className="floating-chat-body">
+            <AiChat
+              projectId={projectId}
+              hasTranscript={Boolean(transcript)}
+              onApplied={async () => {
+                await editor.reload()
+                await load()
+                onChanged()
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {showImport && (
         <ImportMediaModal

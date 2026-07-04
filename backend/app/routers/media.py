@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
-from ..database import get_session
+from ..database import engine, get_session
 from ..models import MediaAsset, Project
 from ..schemas import MediaImportRequest, MediaRead
 from ..services import media_service
@@ -20,6 +21,63 @@ from .projects import _get_active_project
 router = APIRouter(tags=["media"])
 
 
+# Derived-asset (filmstrip / waveform) generation is CPU + full-file IO heavy.
+# If it runs on-demand while the preview engine is streaming the same file over
+# HTTP range requests, the two contend and the video decode underruns (the
+# picture "sticks"). To avoid that we (1) pre-generate these at import time in
+# the background, and (2) guard each output with a lock so a given asset is only
+# ever generated once — concurrent callers wait for the single in-flight job
+# instead of spawning a duplicate ffmpeg pass.
+_gen_locks: dict[str, threading.Lock] = {}
+_gen_locks_guard = threading.Lock()
+
+
+def _lock_for(key: str) -> threading.Lock:
+    with _gen_locks_guard:
+        lock = _gen_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _gen_locks[key] = lock
+        return lock
+
+
+def _ensure_filmstrip(media_id: str, src: Path, project_id: str, duration: float) -> Path:
+    dest = paths.cache_dir(project_id) / f"filmstrip_{media_id}.jpg"
+    if dest.exists():
+        return dest
+    with _lock_for(str(dest)):
+        if not dest.exists():
+            ffmpeg.generate_filmstrip(src, dest, duration=duration)
+    return dest
+
+
+def _ensure_waveform(media_id: str, src: Path, project_id: str) -> Path:
+    dest = paths.cache_dir(project_id) / f"waveform_{media_id}.json"
+    if dest.exists():
+        return dest
+    with _lock_for(str(dest)):
+        if not dest.exists():
+            peaks = ffmpeg.extract_waveform_peaks(src)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(peaks))
+    return dest
+
+
+def _warm_derived(media_id: str, src_path: str, project_id: str, duration: float) -> None:
+    """Best-effort background pre-generation so editing never triggers ffmpeg."""
+    src = Path(src_path)
+    if not src.exists():
+        return
+    for fn in (
+        lambda: _ensure_filmstrip(media_id, src, project_id, duration),
+        lambda: _ensure_waveform(media_id, src, project_id),
+    ):
+        try:
+            fn()
+        except Exception:  # noqa: BLE001 — warming is best-effort
+            pass
+
+
 @router.post(
     "/api/projects/{project_id}/media/import",
     response_model=MediaRead,
@@ -28,6 +86,7 @@ router = APIRouter(tags=["media"])
 def import_media(
     project_id: str,
     payload: MediaImportRequest,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
 ):
     project: Project = _get_active_project(project_id, session)
@@ -57,6 +116,15 @@ def import_media(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Could not read video: {e}",
         )
+    # Pre-generate the filmstrip + waveform off the request path so they're
+    # cached before the editor plays (and never compete with the decoder).
+    background.add_task(
+        _warm_derived,
+        asset.id,
+        asset.local_path,
+        asset.project_id,
+        asset.duration_seconds or 0.0,
+    )
     return asset
 
 
@@ -69,12 +137,20 @@ def list_media(project_id: str, session: Session = Depends(get_session)):
     return assets
 
 
+# These endpoints stream files back and can be requested many times
+# concurrently (the preview engine demuxes/decodes via HTTP range requests, and
+# the timeline requests filmstrips/waveforms per clip). They must NOT hold a DB
+# connection for the whole streaming response — doing so exhausts the connection
+# pool / locks SQLite under concurrency (500s + stalled reads). So they look up
+# the asset in a short-lived session that closes *before* the file is streamed.
 @router.get("/api/media/{media_id}/thumbnail")
-def get_media_thumbnail(media_id: str, session: Session = Depends(get_session)):
-    asset = session.get(MediaAsset, media_id)
-    if asset is None or not asset.thumbnail_path:
+def get_media_thumbnail(media_id: str):
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        thumb = asset.thumbnail_path if asset else None
+    if not thumb:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
-    path = Path(asset.thumbnail_path)
+    path = Path(thumb)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail file missing")
     return FileResponse(path, media_type="image/jpeg")
@@ -92,59 +168,57 @@ _VIDEO_MIME = {
 
 
 @router.get("/api/media/{media_id}/file")
-def get_media_file(media_id: str, session: Session = Depends(get_session)):
+def get_media_file(media_id: str):
     """Stream the video file for in-app preview. Read-only; supports range."""
-    asset = session.get(MediaAsset, media_id)
-    if asset is None:
-        raise HTTPException(status_code=404, detail="Media not found")
-    path = Path(asset.local_path)
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Media not found")
+        path = Path(asset.local_path)
+        original = asset.original_filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Media file missing")
     media_type = _VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
-    return FileResponse(path, media_type=media_type, filename=asset.original_filename)
+    return FileResponse(path, media_type=media_type, filename=original)
 
 
 @router.get("/api/media/{media_id}/filmstrip")
-def get_media_filmstrip(media_id: str, session: Session = Depends(get_session)):
+def get_media_filmstrip(media_id: str):
     """A tiled strip of frames for the clip background (generated + cached)."""
-    asset = session.get(MediaAsset, media_id)
-    if asset is None:
-        raise HTTPException(status_code=404, detail="Media not found")
-    src = Path(asset.local_path)
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Media not found")
+        src = Path(asset.local_path)
+        project_id = asset.project_id
+        duration = asset.duration_seconds or 0.0
     if not src.exists():
         raise HTTPException(status_code=404, detail="Media file missing")
 
-    dest = paths.cache_dir(asset.project_id) / f"filmstrip_{media_id}.jpg"
-    if not dest.exists():
-        try:
-            ffmpeg.generate_filmstrip(
-                src, dest, duration=asset.duration_seconds or 0.0
-            )
-        except FFmpegError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+    try:
+        dest = _ensure_filmstrip(media_id, src, project_id, duration)
+    except FFmpegError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return FileResponse(dest, media_type="image/jpeg")
 
 
 @router.get("/api/media/{media_id}/waveform")
-def get_media_waveform(media_id: str, session: Session = Depends(get_session)):
+def get_media_waveform(media_id: str):
     """Normalized audio peaks for waveform drawing (generated + cached)."""
-    asset = session.get(MediaAsset, media_id)
-    if asset is None:
-        raise HTTPException(status_code=404, detail="Media not found")
-    src = Path(asset.local_path)
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Media not found")
+        src = Path(asset.local_path)
+        project_id = asset.project_id
     if not src.exists():
         raise HTTPException(status_code=404, detail="Media file missing")
 
-    dest = paths.cache_dir(asset.project_id) / f"waveform_{media_id}.json"
-    if dest.exists():
-        return {"peaks": json.loads(dest.read_text())}
     try:
-        peaks = ffmpeg.extract_waveform_peaks(src)
+        dest = _ensure_waveform(media_id, src, project_id)
     except FFmpegError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(peaks))
-    return {"peaks": peaks}
+    return {"peaks": json.loads(dest.read_text())}
 
 
 @router.get("/api/projects/{project_id}/thumbnail")

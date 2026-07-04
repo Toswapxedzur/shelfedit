@@ -33,7 +33,7 @@ function niceInterval(targetSeconds: number): number {
 }
 
 export function TimelineView({ editor, mediaById, duration }: Props) {
-  const { data, pxPerSec, playhead, selectedId, subscribePlayhead } = editor
+  const { data, pxPerSec, playhead, selectedId, selectedIds, subscribePlayhead } = editor
   const rulerRef = useRef<HTMLDivElement>(null)
   const playheadElRef = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
@@ -208,7 +208,7 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
                       el={el}
                       track={track}
                       pxPerSec={pxPerSec}
-                      selected={el.id === selectedId}
+                      selected={selectedIds.includes(el.id)}
                       sourceMax={media?.duration_seconds ?? undefined}
                       label={media?.original_filename ?? 'clip'}
                       editor={editor}
