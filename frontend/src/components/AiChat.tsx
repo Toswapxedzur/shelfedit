@@ -5,14 +5,29 @@ import {
   type AiChange,
   type AiMessage,
 } from '../api/client'
+import { describeCommand, type EditorCommand } from '../editor/commands'
 
 interface Props {
   projectId: string
   hasTranscript: boolean
   onApplied: () => void
+  // When shown in the detached agent window, the header offers an "Attach"
+  // button that docks the panel back into the main editor.
+  detached?: boolean
+  onAttach?: () => void
+  // Called when the AI proposes structured editor commands (the shared action
+  // layer). In the detached window these are relayed to the main editor.
+  onCommands?: (cmds: EditorCommand[]) => void
 }
 
-export function AiChat({ projectId, hasTranscript, onApplied }: Props) {
+export function AiChat({
+  projectId,
+  hasTranscript,
+  onApplied,
+  detached,
+  onAttach,
+  onCommands,
+}: Props) {
   const [messages, setMessages] = useState<AiMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -64,11 +79,18 @@ export function AiChat({ projectId, hasTranscript, onApplied }: Props) {
     }
   }
 
-  const apply = async (messageId: string) => {
+  const apply = async (messageId: string, change: AiChange) => {
     setApplyingId(messageId)
     setError(null)
     try {
-      await api.applyChange(projectId, messageId)
+      if (change.type === 'commands' && Array.isArray(change.commands)) {
+        // Structured edits go straight through the shared action layer (the
+        // main editor runs them as normal, undoable commands).
+        onCommands?.(change.commands as EditorCommand[])
+      } else {
+        // Cut plans are versioned by the backend; the editor then reloads.
+        await api.applyChange(projectId, messageId)
+      }
       setMessages(await api.getMessages(projectId))
       onApplied()
     } catch (e) {
@@ -81,8 +103,15 @@ export function AiChat({ projectId, hasTranscript, onApplied }: Props) {
   return (
     <div className="ai-chat">
       <div className="ai-head">
-        <h3>AI edit</h3>
-        <span className="subtitle-sm">Ask for cuts and edits</span>
+        <div>
+          <h3>AI edit</h3>
+          <span className="subtitle-sm">Ask for cuts and edits</span>
+        </div>
+        {detached && (
+          <button className="btn small" title="Dock back into the editor" onClick={onAttach}>
+            ⤓ Attach
+          </button>
+        )}
       </div>
 
       <div className="ai-messages" ref={scrollRef}>
@@ -101,7 +130,7 @@ export function AiChat({ projectId, hasTranscript, onApplied }: Props) {
                 change={m.change}
                 status={m.change_status}
                 applying={applyingId === m.id}
-                onApply={() => apply(m.id)}
+                onApply={() => apply(m.id, m.change!)}
               />
             )}
           </div>
@@ -149,29 +178,49 @@ function ChangeCard({
   applying: boolean
   onApply: () => void
 }) {
+  const isCommands = change.type === 'commands' && Array.isArray(change.commands)
+  const commands = (change.commands ?? []) as EditorCommand[]
   const keep = change.keep ?? []
   const kept = keep.reduce((sum, k) => sum + (k.end - k.start), 0)
   return (
     <div className="change-card">
-      <div className="change-head">
-        Proposed cut plan · keep {keep.length} section
-        {keep.length === 1 ? '' : 's'} ({formatDuration(kept)})
-      </div>
-      <div className="change-list">
-        {keep.map((k, i) => (
-          <div className="change-row" key={i}>
-            <span className="seg-time">
-              {formatDuration(k.start)}–{formatDuration(k.end)}
-            </span>
-            <span className="seg-text">{k.label || k.reason || 'keep'}</span>
+      {isCommands ? (
+        <>
+          <div className="change-head">
+            Proposed edit · {commands.length} action
+            {commands.length === 1 ? '' : 's'}
           </div>
-        ))}
-      </div>
+          <div className="change-list">
+            {commands.map((c, i) => (
+              <div className="change-row" key={i}>
+                <span className="seg-text">{describeCommand(c)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="change-head">
+            Proposed cut plan · keep {keep.length} section
+            {keep.length === 1 ? '' : 's'} ({formatDuration(kept)})
+          </div>
+          <div className="change-list">
+            {keep.map((k, i) => (
+              <div className="change-row" key={i}>
+                <span className="seg-time">
+                  {formatDuration(k.start)}–{formatDuration(k.end)}
+                </span>
+                <span className="seg-text">{k.label || k.reason || 'keep'}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       {status === 'applied' ? (
         <div className="change-applied">✓ Applied to timeline</div>
       ) : (
         <button className="btn primary small" onClick={onApply} disabled={applying}>
-          {applying ? 'Applying…' : 'Apply cuts'}
+          {applying ? 'Applying…' : isCommands ? 'Apply edit' : 'Apply cuts'}
         </button>
       )}
     </div>

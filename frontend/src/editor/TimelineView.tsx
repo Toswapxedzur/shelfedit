@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { MediaAsset } from '../api/client'
+import type { MediaAsset, TimelineElement, TimelineTrack } from '../api/client'
 import { ClipView } from './ClipView'
 import { TimelineToolbar } from './TimelineToolbar'
 import { formatTimecode } from './format'
@@ -7,11 +7,14 @@ import {
   addClip,
   addTrack,
   clipDuration,
+  clipEnd,
   deleteClip,
+  findClip,
+  makeGroupId,
   makeTextClip,
   moveTrack,
   removeTrack,
-  setTrackMuted,
+  setTrackFlags,
   splitClip,
 } from './timeline'
 import type { TrackKind } from '../api/client'
@@ -38,8 +41,42 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
   const playheadElRef = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
   const scrubT = useRef(0)
+  // Live map of trackId -> its lane DOM node, so a clip drag can resolve which
+  // track lane the cursor is over (2D cross-track dragging).
+  const laneRefs = useRef(new Map<string, HTMLDivElement>())
+
+  // Editing is frame-based: snap the playhead to the project's frame grid so
+  // scrubbing at extreme zoom lands on discrete frames (what real NLEs do)
+  // instead of jittering between sub-frame positions.
+  const fps = data?.canvas?.fps ?? 30
+  const quantize = (t: number) => Math.round(t * fps) / fps
 
   const viewSeconds = Math.max(duration + 3, MIN_VIEW_SECONDS)
+
+  // The track lane sitting under a screen-Y coordinate (used while dragging a
+  // clip to decide which track it would drop onto — "the track its center line
+  // lands on").
+  const resolveTrackAt = (clientY: number): TimelineTrack | null => {
+    if (!data) return null
+    for (const track of data.tracks) {
+      const node = laneRefs.current.get(track.id)
+      if (!node) continue
+      const r = node.getBoundingClientRect()
+      if (clientY >= r.top && clientY <= r.bottom) return track
+    }
+    return null
+  }
+
+  // Clips linked (magnet group) to the current selection — highlighted yellow.
+  const selectedGroupIds = new Set<string>()
+  if (data) {
+    for (const id of selectedIds) {
+      const f = findClip(data, id)
+      if (f?.el.groupId) selectedGroupIds.add(f.el.groupId)
+    }
+  }
+  const isLinkedToSelection = (el: TimelineElement): boolean =>
+    !!el.groupId && selectedGroupIds.has(el.groupId) && !selectedIds.includes(el.id)
 
   // Move the playhead line via the live channel (no re-render during playback
   // or scrubbing). Re-subscribes when the zoom (pxPerSec) changes.
@@ -59,7 +96,8 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
   const seekLive = (clientX: number) => {
     const rect = rulerRef.current?.getBoundingClientRect()
     if (!rect) return
-    const t = Math.min(Math.max(0, (clientX - rect.left) / pxPerSec), viewSeconds)
+    const raw = Math.min(Math.max(0, (clientX - rect.left) / pxPerSec), viewSeconds)
+    const t = quantize(raw)
     scrubT.current = t
     editor.livePlayhead(t)
   }
@@ -100,7 +138,25 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
     const sel = data.tracks.find((t) => t.id === editor.selectedTrackId)
     const textTrack = sel && sel.kind === 'text' ? sel : data.tracks.find((t) => t.kind === 'text')
     if (!textTrack) return
-    editor.commit((d) => addClip(d, textTrack.id, makeTextClip('New text', playhead)))
+    // If a video clip is selected and the new text lands over it, pin the text
+    // to that shot by linking them (they'll move together as a magnet group).
+    const overVideo = selectedIds
+      .map((id) => findClip(data, id)?.el)
+      .find(
+        (e): e is TimelineElement =>
+          !!e && e.type === 'video' && playhead >= e.timeline_start && playhead < clipEnd(e),
+      )
+    editor.commit((d) => {
+      const text = makeTextClip('New text', playhead)
+      if (overVideo) {
+        const gid = overVideo.groupId ?? makeGroupId()
+        text.groupId = gid
+        // Stamp the group id onto the video too (if it wasn't already grouped).
+        for (const t of d.tracks)
+          for (const e of t.elements) if (e.id === overVideo.id) e.groupId = gid
+      }
+      return addClip(d, textTrack.id, text)
+    })
   }
 
   const doAddTrack = (kind: TrackKind) => {
@@ -189,17 +245,42 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
                 </span>
                 <span className="track-name">{track.name}</span>
                 <button
-                  className={`mute-btn ${track.muted ? 'on' : ''}`}
-                  title={track.muted ? 'Unmute' : 'Mute'}
+                  className={`track-flag ${track.hidden ? '' : 'on'}`}
+                  title={
+                    track.hidden
+                      ? track.kind === 'audio'
+                        ? 'Muted — click to play'
+                        : 'Hidden — click to show'
+                      : track.kind === 'audio'
+                        ? 'Audible — click to mute'
+                        : 'Visible — click to hide'
+                  }
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() =>
-                    editor.commit((d) => setTrackMuted(d, track.id, !track.muted))
+                    editor.commit((d) => setTrackFlags(d, track.id, { hidden: !track.hidden }))
                   }
                 >
-                  {track.muted ? '🔇' : '🔈'}
+                  {track.hidden ? (track.kind === 'audio' ? '🔇' : '⦸') : track.kind === 'audio' ? '🔈' : '👁'}
+                </button>
+                <button
+                  className={`track-flag ${track.locked ? 'on' : ''}`}
+                  title={track.locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() =>
+                    editor.commit((d) => setTrackFlags(d, track.id, { locked: !track.locked }))
+                  }
+                >
+                  {track.locked ? '🔒' : '🔓'}
                 </button>
               </div>
-              <div className="tl-lane" style={{ width: laneWidth }}>
+              <div
+                className={`tl-lane ${track.locked ? 'locked' : ''}`}
+                style={{ width: laneWidth }}
+                ref={(node) => {
+                  if (node) laneRefs.current.set(track.id, node)
+                  else laneRefs.current.delete(track.id)
+                }}
+              >
                 {track.elements.map((el) => {
                   const media = el.media_id ? mediaById.get(el.media_id) : undefined
                   return (
@@ -209,9 +290,11 @@ export function TimelineView({ editor, mediaById, duration }: Props) {
                       track={track}
                       pxPerSec={pxPerSec}
                       selected={selectedIds.includes(el.id)}
+                      linked={isLinkedToSelection(el)}
                       sourceMax={media?.duration_seconds ?? undefined}
                       label={media?.original_filename ?? 'clip'}
                       editor={editor}
+                      resolveTrackAt={resolveTrackAt}
                     />
                   )
                 })}

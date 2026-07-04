@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from ..database import engine, get_session
 from ..models import MediaAsset, Project
-from ..schemas import MediaImportRequest, MediaRead
+from ..schemas import MediaClassifyRequest, MediaImportRequest, MediaRead
 from ..services import media_service
 from ..utils import ffmpeg, paths
 from ..utils.ffmpeg import FFmpegError
@@ -135,6 +135,37 @@ def list_media(project_id: str, session: Session = Depends(get_session)):
         select(MediaAsset).where(MediaAsset.project_id == project_id)
     ).all()
     return assets
+
+
+@router.patch("/api/media/{media_id}", response_model=MediaRead)
+def update_media(
+    media_id: str,
+    payload: MediaClassifyRequest,
+    session: Session = Depends(get_session),
+):
+    """Edit an asset's library classification (category / tags / description)."""
+    asset = session.get(MediaAsset, media_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    current = asset._classification()
+    category = current["category"] if payload.category is None else payload.category
+    tags = current["tags"] if payload.tags is None else payload.tags
+    # Normalize/dedupe tags, drop blanks.
+    clean_tags = []
+    seen = set()
+    for t in tags:
+        s = str(t).strip()
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            clean_tags.append(s)
+    asset.tags_json = json.dumps({"category": (category or None), "tags": clean_tags})
+    if payload.description is not None:
+        asset.description = payload.description or None
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    return asset
 
 
 # These endpoints stream files back and can be requested many times

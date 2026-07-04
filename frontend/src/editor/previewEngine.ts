@@ -40,10 +40,13 @@ import { resolveAudioGain } from './effects'
 export type FrameCanvas = ImageBitmap
 
 // One decoded frame we own: an ImageBitmap copied out of the decoder's pool,
-// plus its presentation timestamp (seconds, in source time).
+// plus its display interval [timestamp, timestamp + duration) in source-time
+// seconds. The duration lets us tell when a scrub actually lands on a DIFFERENT
+// frame (so we only decode when the picture would change).
 interface Frame {
   image: ImageBitmap
   timestamp: number
+  duration: number
 }
 
 // How far ahead of the clock to decode. Bigger = more resilient to hiccups but
@@ -115,6 +118,12 @@ export class PreviewEngine {
   private anchorTL = 0
   private pausedAt = 0
   private pumpTimer: number | null = null
+  // Scrub seek serialization: only ever one decode in flight, always converging
+  // to the latest requested target. Overlapping seeks on the same mediabunny
+  // decoder race and can leave the frame stuck behind the playhead.
+  private seeking = false
+  private pendingSeek: number | null = null
+  private seekingPromise: Promise<void> | null = null
   private readonly onEnded: () => void
 
   constructor(onEnded: () => void) {
@@ -191,24 +200,64 @@ export class PreviewEngine {
     }
   }
 
-  // Point the preview at an exact time while paused (scrubbing). Decodes the
-  // precise frame for each active video clip. Returns once frames are ready so
-  // the caller can redraw.
+  // Point the preview at an exact time while paused (scrubbing).
+  //
+  // Sequential seek queue: we only ever run ONE decode at a time and always
+  // converge to the LATEST requested target. Firing overlapping decodes on the
+  // same mediabunny decoder races them and can leave the frame frozen behind the
+  // playhead (the classic scrub freeze). Every caller's promise resolves once
+  // the frame for the final settled target is on screen, so the caller can
+  // redraw and see the right frame.
   async seekTo(t: number): Promise<void> {
     this.pausedAt = clamp(t, 0, this.duration)
-    const { videos } = this.activeClips(this.pausedAt)
+    this.pendingSeek = this.pausedAt
+    if (this.seeking && this.seekingPromise) return this.seekingPromise
+    this.seeking = true
+    this.seekingPromise = (async () => {
+      try {
+        while (this.pendingSeek != null) {
+          const target = this.pendingSeek
+          this.pendingSeek = null
+          await this.decodeSeekFrame(target)
+        }
+      } finally {
+        this.seeking = false
+        this.seekingPromise = null
+      }
+    })()
+    return this.seekingPromise
+  }
+
+  // Decode + show the exact frame for each active video clip at time `t`.
+  //
+  // Frame-change gate: if the frame already on screen for a source covers the
+  // requested source time (its display interval contains it), the picture would
+  // not change, so we skip the decode entirely. This is what NLEs do while
+  // scrubbing — decode on frame change, not on every playhead position — and it
+  // keeps fast/oscillating scrubs from flooding the decoder with no-op work.
+  private async decodeSeekFrame(t: number): Promise<void> {
+    const { videos } = this.activeClips(t)
     await Promise.all(
       videos.map(async ({ el }) => {
         const entry = this.ensureSource(el.media_id as string)
         await entry.ready
         if (!entry.canvasSink) return
-        const st = Math.max(0, sourceTimeOf(el, this.pausedAt))
+        const st = Math.max(0, sourceTimeOf(el, t))
+        const cur = entry.current
+        if (
+          cur &&
+          cur.duration > 0 &&
+          st >= cur.timestamp - 1e-4 &&
+          st < cur.timestamp + cur.duration - 1e-4
+        ) {
+          return // same frame already shown — no decode needed
+        }
         try {
           const wc = await entry.canvasSink.getCanvas(st)
           if (wc) {
             const image = await createImageBitmap(wc.canvas)
             const prev = entry.current
-            entry.current = { image, timestamp: wc.timestamp }
+            entry.current = { image, timestamp: wc.timestamp, duration: wc.duration }
             prev?.image.close()
             this.clearQueue(entry)
           }
@@ -329,6 +378,8 @@ export class PreviewEngine {
     const audios: { track: TimelineTrack; el: TimelineElement }[] = []
     for (const track of this.data.tracks) {
       if (track.kind !== 'video' && track.kind !== 'audio') continue
+      // A hidden track shows/plays nothing (mirrors the export).
+      if (track.hidden) continue
       for (const el of track.elements) {
         if (!el.media_id) continue
         if (t >= el.timeline_start && t < clipEnd(el)) {
@@ -408,7 +459,7 @@ export class PreviewEngine {
             image.close()
             break
           }
-          entry.frameQueue.push({ image, timestamp: wc.timestamp })
+          entry.frameQueue.push({ image, timestamp: wc.timestamp, duration: wc.duration })
           // Pace: don't run more than FRAME_LEAD ahead of the clock. The async
           // generator is lazy, so pausing here also pauses decoding (which also
           // bounds how much memory the decode-ahead queue can use).
@@ -538,7 +589,7 @@ export class PreviewEngine {
   // The audio clip on this source covering timeline time `t` (or null).
   private audioClipForSource(mediaId: string, t: number): TimelineElement | null {
     for (const track of this.data.tracks) {
-      if (track.kind !== 'audio') continue
+      if (track.kind !== 'audio' || track.hidden) continue
       for (const el of track.elements) {
         if (el.media_id === mediaId && t >= el.timeline_start && t < clipEnd(el)) return el
       }
@@ -552,7 +603,7 @@ export class PreviewEngine {
     st: number,
   ): { track: TimelineTrack; el: TimelineElement } | null {
     for (const track of this.data.tracks) {
-      if (track.kind !== 'audio') continue
+      if (track.kind !== 'audio' || track.hidden) continue
       for (const el of track.elements) {
         if (el.media_id !== mediaId) continue
         const s0 = el.source_start ?? 0

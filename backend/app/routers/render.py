@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from ..database import get_session
 from ..models import Job, JobKind, JobStatus, MediaAsset, MediaType, Timeline
-from ..schemas import JobRead, MediaRead
+from ..schemas import JobRead, MediaRead, RenderRequest
 from ..utils.ffmpeg import ffmpeg_available
 from ..workers import job_runner
 from .projects import _get_active_project
@@ -20,7 +20,11 @@ router = APIRouter(tags=["render"])
     response_model=JobRead,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def start_render(project_id: str, session: Session = Depends(get_session)):
+def start_render(
+    project_id: str,
+    payload: RenderRequest | None = Body(default=None),
+    session: Session = Depends(get_session),
+):
     _get_active_project(project_id, session)
 
     if not ffmpeg_available():
@@ -43,7 +47,7 @@ def start_render(project_id: str, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(job)
 
-    job_runner.start_render_job(job.id)
+    job_runner.start_render_job(job.id, payload or RenderRequest())
     return job
 
 

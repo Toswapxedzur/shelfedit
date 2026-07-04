@@ -23,6 +23,7 @@ router = APIRouter(tags=["timeline"])
 def _default_timeline_data() -> dict:
     return {
         "duration": 0,
+        "canvas": {"width": 1280, "height": 720, "fps": 30},
         "tracks": [
             {"id": "trk_text_1", "kind": "text", "name": "Text", "order": 0, "elements": []},
             {"id": "trk_video_1", "kind": "video", "name": "Video", "order": 1, "elements": []},

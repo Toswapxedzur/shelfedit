@@ -74,6 +74,25 @@ export function TimelineToolbar({
         ⌫ Track
       </button>
       <div className="tbar-spacer" />
+      {/* Cursor modes live with the zoom strip — they change what a click on a
+          clip does (select/move vs. cut). */}
+      <div className="tbar-cursor">
+        <button
+          className={`tbtn ${editor.mode === 'select' ? 'active' : ''}`}
+          onClick={() => editor.setMode('select')}
+          title="Select cursor — move & trim clips (V)"
+        >
+          ⤢ Select
+        </button>
+        <button
+          className={`tbtn ${editor.mode === 'blade' ? 'active' : ''}`}
+          onClick={() => editor.setMode('blade')}
+          title="Blade cursor — click a clip to cut it (B)"
+        >
+          🔪 Blade
+        </button>
+      </div>
+      <div className="tbar-sep" />
       <span className="tbar-label">Zoom</span>
       <button className="tbtn" onClick={() => zoom(1 / 1.4)} title="Zoom out">
         −
