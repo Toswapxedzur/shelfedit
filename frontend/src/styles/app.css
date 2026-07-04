@@ -312,6 +312,10 @@
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 6px;
+  margin-top: 10px;
+}
+.modal > label:first-of-type {
+  margin-top: 0;
 }
 .modal input {
   width: 100%;
@@ -331,6 +335,94 @@
   justify-content: flex-end;
   gap: 10px;
   margin-top: 20px;
+}
+
+/* Project setup + export panel controls. */
+.modal select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.modal select:focus {
+  border-color: var(--accent);
+}
+.modal .chip-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.modal .chip {
+  flex: 1;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.modal .chip:hover {
+  border-color: var(--accent);
+}
+.modal .chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+}
+.chip-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.aspect-swatch {
+  display: block;
+  width: 34px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.field-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.field {
+  flex: 1;
+  min-width: 0;
+}
+.canvas-summary {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.save-location {
+  margin-top: 6px;
+}
+.save-location-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.save-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 .btn {
   padding: 9px 16px;
@@ -824,6 +916,12 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ai-head > div {
+  display: flex;
   align-items: baseline;
   gap: 10px;
 }
@@ -1271,6 +1369,15 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+.tbtn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.tbar-cursor {
+  display: flex;
+  gap: 4px;
+}
 .tbar-sep {
   width: 1px;
   align-self: stretch;
@@ -1354,6 +1461,94 @@
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+/* ---- Assets library tool (search + editable classification) ---- */
+.assets-tool {
+  width: 420px;
+}
+.assets-tool .assets-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+.assets-search {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.assets-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 6px 8px;
+}
+.assets-filter .chip {
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+}
+.assets-filter .chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.assets-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 10px 6px;
+}
+.asset-row {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.asset-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.asset-classify {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.asset-cat,
+.asset-tags {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.asset-cat {
+  width: 110px;
+  flex-shrink: 0;
+}
+.asset-tags {
+  flex: 1;
+  min-width: 0;
+}
+.btn.tiny {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 6px;
 }
 
 .tl-scroll {
@@ -1504,6 +1699,49 @@
   outline: 2px solid var(--accent);
   outline-offset: -1px;
   z-index: 3;
+}
+/* Magnet group members of the current selection. */
+.clip.linked {
+  outline: 2px solid #f2c94c;
+  outline-offset: -1px;
+}
+/* Lifted clip during a 2D drag. */
+.clip.dragging {
+  z-index: 40;
+  opacity: 0.92;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  cursor: grabbing;
+}
+/* Drop target is incompatible or would overlap → refuse. */
+.clip.invalid {
+  outline: 2px solid #eb5757;
+  outline-offset: -1px;
+  background: #4a1d22 !important;
+}
+/* A locked track's clips can't be moved/trimmed. */
+.clip.locked {
+  cursor: default;
+  opacity: 0.85;
+}
+.tl-lane.locked {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0.03) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+.track-flag {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.45;
+  padding: 0 2px;
+}
+.track-flag.on {
+  opacity: 1;
 }
 .clip-film {
   position: absolute;
@@ -1794,6 +2032,39 @@
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+/* The detached AI agent, rendered as its own OS window (fills that window). */
+.agent-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: var(--bg);
+}
+.agent-window .ai-chat {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+}
+
+/* Small pill in the main editor to re-dock the AI when it's in a separate
+   window (the agent window has its own Attach button too). */
+.attach-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.attach-pill:hover {
+  border-color: var(--accent);
 }
 
 /* ---------- Canvas cursors per mode ---------- */

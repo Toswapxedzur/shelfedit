@@ -29,8 +29,11 @@ from ..models import (
     TranscriptSegment,
     TranscriptWord,
 )
+from ..schemas import RenderRequest
 from ..services import render_service, transcription_service as tx
 from ..utils import ffmpeg, paths
+
+_CONTAINER_EXT = {"mp4": ".mp4", "mov": ".mov", "webm": ".webm"}
 
 
 def _utcnow() -> datetime:
@@ -234,17 +237,56 @@ def _build_media_map(
     return media_map
 
 
-def _next_export_path(project_id: str) -> Path:
-    """A fresh, versioned export filename — never overwrites an existing one."""
+def _sanitize_stem(name: str) -> str:
+    keep = "".join(c if c.isalnum() or c in " -_." else "_" for c in name).strip()
+    return (keep or "export")[:120]
+
+
+def _resolve_output_path(project_id: str, request: RenderRequest) -> Path:
+    """Where to write the export.
+
+    A user-chosen absolute path (from the native save dialog) wins and is used
+    verbatim, with its extension normalised to the container. Otherwise we write
+    a fresh, versioned filename into the project's renders folder.
+    """
+    ext = _CONTAINER_EXT.get(request.container, ".mp4")
+
+    if request.output_path:
+        p = Path(request.output_path).expanduser()
+        if p.suffix.lower() != ext:
+            p = p.with_suffix(ext)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
     rdir = paths.renders_dir(project_id)
     rdir.mkdir(parents=True, exist_ok=True)
+    stem = _sanitize_stem(request.filename) if request.filename else "export"
     version = 1
-    while (rdir / f"export_v{version}.mp4").exists():
+    while (rdir / f"{stem}_v{version}{ext}").exists():
         version += 1
-    return rdir / f"export_v{version}.mp4"
+    return rdir / f"{stem}_v{version}{ext}"
 
 
-def _run_render(job_id: str) -> None:
+def _config_from(request: RenderRequest, data: dict) -> render_service.RenderConfig:
+    """Combine the project canvas with the export options into a RenderConfig."""
+    canvas = data.get("canvas") or {}
+    cw = int(canvas.get("width", render_service.OUT_W))
+    ch = int(canvas.get("height", render_service.OUT_H))
+    cfps = int(canvas.get("fps", render_service.FPS))
+    crf = render_service._QUALITY_CRF.get(request.quality, 20)
+    return render_service.RenderConfig(
+        width=cw,
+        height=ch,
+        fps=request.fps or cfps,
+        out_width=request.width,
+        out_height=request.height,
+        container=request.container,
+        crf=crf,
+    )
+
+
+def _run_render(job_id: str, request: RenderRequest | None = None) -> None:
+    request = request or RenderRequest()
     with Session(engine) as session:
         job = session.get(Job, job_id)
         if job is None:
@@ -286,7 +328,8 @@ def _run_render(job_id: str) -> None:
             session.add(project)
             session.commit()
 
-            output_path = _next_export_path(project.id)
+            output_path = _resolve_output_path(project.id, request)
+            cfg = _config_from(request, data)
 
             # Throttle DB writes: only commit when progress moves a bit.
             last = {"p": 0.0}
@@ -303,6 +346,7 @@ def _run_render(job_id: str) -> None:
                 data,
                 media_map,
                 output_path,
+                cfg=cfg,
                 on_progress=on_progress,
             )
 
@@ -340,13 +384,17 @@ def _restore_status(session: Session, project: Project, status: ProjectStatus) -
 
 def _persist_export(session: Session, project: Project, output_path: Path) -> MediaAsset:
     probe = ffmpeg.probe(output_path)
+    # Exports saved to a user-chosen location live outside the project folder,
+    # so they are referenced in place with no project-relative path.
+    renders_dir = paths.renders_dir(project.id)
+    in_project = renders_dir in output_path.parents
     asset = MediaAsset(
         project_id=project.id,
         type=MediaType.export,
-        storage_kind=StorageKind.copied,
+        storage_kind=StorageKind.copied if in_project else StorageKind.referenced,
         original_filename=output_path.name,
         local_path=str(output_path),
-        relative_path=f"renders/{output_path.name}",
+        relative_path=f"renders/{output_path.name}" if in_project else None,
         duration_seconds=probe.duration_seconds,
         width=probe.width,
         height=probe.height,
@@ -358,6 +406,8 @@ def _persist_export(session: Session, project: Project, output_path: Path) -> Me
     return asset
 
 
-def start_render_job(job_id: str) -> None:
+def start_render_job(job_id: str, request: RenderRequest | None = None) -> None:
     """Spawn the render worker on a daemon thread."""
-    threading.Thread(target=_run_render, args=(job_id,), daemon=True).start()
+    threading.Thread(
+        target=_run_render, args=(job_id, request), daemon=True
+    ).start()

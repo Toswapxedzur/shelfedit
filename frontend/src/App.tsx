@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
 import './styles/app.css'
-import { api, type Project } from './api/client'
+import { api, type CanvasSpec, type Project } from './api/client'
 import { Sidebar, type View } from './components/Sidebar'
 import { ProjectCard } from './components/ProjectCard'
 import { CreateProjectModal } from './components/CreateProjectModal'
 import { ProjectDetail } from './components/ProjectDetail'
+import { AgentWindow } from './components/AgentWindow'
+import { isAgentView } from './editor/agentBridge'
 
 export default function App() {
+  // A detached AI agent window loads the same bundle with ?view=agent and
+  // renders only the assistant, wired back to the main editor over the bridge.
+  if (isAgentView()) {
+    return <AgentWindow />
+  }
+  return <MainApp />
+}
+
+function MainApp() {
   const [view, setView] = useState<View>('home')
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -38,8 +49,8 @@ export default function App() {
     refresh()
   }, [])
 
-  const handleCreate = async (name: string) => {
-    const created = await api.createProject(name)
+  const handleCreate = async (name: string, canvas: CanvasSpec) => {
+    const created = await api.createProject(name, canvas)
     setShowCreate(false)
     await refresh()
     // Open the new project's edit screen; importing happens there, not forced.

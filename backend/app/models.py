@@ -195,8 +195,37 @@ class MediaAsset(SQLModel, table=True):
     size_bytes: int | None = Field(default=None)
 
     description: str | None = Field(default=None)
+    # Classification lives in tags_json as {"category": str|null, "tags": [...]}.
+    # (Older rows may hold a bare JSON list of tags — parsed back-compatibly.)
     tags_json: str | None = Field(default=None)
 
     thumbnail_path: str | None = Field(default=None)
 
     created_at: datetime = Field(default_factory=_utcnow)
+
+    def _classification(self) -> dict:
+        import json as _json
+
+        if not self.tags_json:
+            return {"category": None, "tags": []}
+        try:
+            raw = _json.loads(self.tags_json)
+        except (ValueError, TypeError):
+            return {"category": None, "tags": []}
+        if isinstance(raw, list):
+            return {"category": None, "tags": [str(t) for t in raw]}
+        if isinstance(raw, dict):
+            tags = raw.get("tags") or []
+            return {
+                "category": raw.get("category"),
+                "tags": [str(t) for t in tags if isinstance(tags, list)],
+            }
+        return {"category": None, "tags": []}
+
+    @property
+    def category(self) -> str | None:
+        return self._classification()["category"]
+
+    @property
+    def tags(self) -> list[str]:
+        return self._classification()["tags"]

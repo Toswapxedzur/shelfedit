@@ -6,13 +6,14 @@ project record and never touches media files (per the plan's safety rules).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import MediaAsset, MediaType, Project
+from ..models import MediaAsset, MediaType, Project, Timeline
 from ..schemas import ProjectCreate, ProjectRead, ProjectUpdate
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -58,6 +59,20 @@ def create_project(payload: ProjectCreate, session: Session = Depends(get_sessio
     session.add(project)
     session.commit()
     session.refresh(project)
+
+    # Seed the initial timeline with the chosen canvas (resolution / fps) so the
+    # editor and renderer use it from the start. Lazy import avoids a cycle with
+    # the timeline router.
+    if payload.canvas is not None:
+        from .timeline import _default_timeline_data
+
+        data = _default_timeline_data()
+        data["canvas"] = payload.canvas.model_dump()
+        session.add(
+            Timeline(project_id=project.id, version=1, data_json=json.dumps(data))
+        )
+        session.commit()
+
     return build_project_read(project, session)
 
 

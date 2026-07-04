@@ -10,7 +10,9 @@ import {
   type Transcript,
 } from '../api/client'
 import { ImportMediaModal } from './ImportMediaModal'
+import { ExportModal } from './ExportModal'
 import { AiChat } from './AiChat'
+import { AssetsPanel } from './AssetsPanel'
 import { PreviewCanvas } from '../editor/PreviewCanvas'
 import { TimelineView } from '../editor/TimelineView'
 import { Inspector } from '../editor/Inspector'
@@ -20,9 +22,16 @@ import {
   addClip,
   addTrack,
   makeAudioClip,
+  makeGroupId,
   makeTextClip,
   makeVideoClip,
 } from '../editor/timeline'
+import {
+  closeAgentWindow,
+  onAgentMessage,
+  onAgentWindowClosed,
+  openAgentWindow,
+} from '../editor/agentBridge'
 
 interface Props {
   projectId: string
@@ -47,6 +56,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const [renderJob, setRenderJob] = useState<Job | null>(null)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [exportsList, setExportsList] = useState<MediaAsset[]>([])
+  const [showExport, setShowExport] = useState(false)
   const renderPollRef = useRef<number | null>(null)
 
   const editor = useEditor(projectId)
@@ -58,6 +68,9 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const [timelineH, setTimelineH] = useState(320)
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [chatDetached, setChatDetached] = useState(false)
+  // Set when the browser blocked a real popup, so we fall back to the in-app
+  // floating panel instead of a separate window.
+  const [chatFloatingFallback, setChatFloatingFallback] = useState(false)
   const [chatPos, setChatPos] = useState({ x: 120, y: 120 })
 
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
@@ -78,6 +91,14 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
+
+  const reloadMedia = useCallback(async () => {
+    try {
+      setMedia(await api.listMedia(projectId))
+    } catch {
+      /* ignore — best-effort refresh */
+    }
+  }, [projectId])
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +137,44 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     }
   }, [])
 
+  // This (main) window is the single source of truth. Listen for messages from
+  // the detached agent window and route them through the same paths the UI
+  // uses, so agent edits are indistinguishable from manual ones.
+  useEffect(() => {
+    const off = onAgentMessage((msg) => {
+      if (msg.kind === 'command') {
+        editor.run(msg.command)
+      } else if (msg.kind === 'reload') {
+        void editor.reload()
+        void load()
+        onChanged()
+      }
+    })
+    // If the agent window is closed (by its Attach button or the OS chrome),
+    // re-dock the panel.
+    const offClosed = onAgentWindowClosed(() => {
+      setChatDetached(false)
+      setChatFloatingFallback(false)
+    })
+    return () => {
+      off()
+      offClosed()
+    }
+  }, [editor, load, onChanged])
+
+  const detachChat = useCallback(() => {
+    const openedRealWindow = openAgentWindow(projectId)
+    setChatDetached(true)
+    // Popup blocked → keep the assistant usable via the in-app floating panel.
+    setChatFloatingFallback(!openedRealWindow)
+  }, [projectId])
+
+  const attachChat = useCallback(() => {
+    closeAgentWindow()
+    setChatDetached(false)
+    setChatFloatingFallback(false)
+  }, [])
+
   const mediaById = useMemo(
     () => new Map(media.map((m) => [m.id, m])),
     [media],
@@ -136,8 +195,17 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     if (hasClip) return
     const dur = video.duration_seconds ?? 0
     editor.commit((d) => {
-      let nd = addClip(d, vt.id, makeVideoClip(video.id, dur, 0))
-      if (at) nd = addClip(nd, at.id, makeAudioClip(video.id, dur, 0))
+      // Auto A/V split: the visual on a video track and its sound on an audio
+      // track, linked so they move together (magnet group).
+      const gid = at ? makeGroupId() : undefined
+      const vClip = makeVideoClip(video.id, dur, 0)
+      if (gid) vClip.groupId = gid
+      let nd = addClip(d, vt.id, vClip)
+      if (at) {
+        const aClip = makeAudioClip(video.id, dur, 0)
+        aClip.groupId = gid
+        nd = addClip(nd, at.id, aClip)
+      }
       return nd
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,15 +287,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
     }, 1000)
   }
 
-  const startRender = async () => {
+  // The export panel starts the render itself and hands us the job to poll.
+  const onExportStarted = (j: Job) => {
     setRenderError(null)
-    try {
-      const j = await api.render(projectId)
-      setRenderJob(j)
-      pollRenderJob(j.id)
-    } catch (e) {
-      setRenderError(e instanceof Error ? e.message : 'Failed to render')
-    }
+    setShowExport(false)
+    setRenderJob(j)
+    pollRenderJob(j.id)
   }
 
   const handleImported = async () => {
@@ -290,8 +355,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   const assets = media.filter((m) => m.type !== 'export')
 
   // Drop a clip for an imported asset onto a compatible track at the playhead.
+  // A video asset also drops its audio onto an audio track (linked), so it has
+  // sound in the preview and export, and the two move together.
   const placeAsset = (m: MediaAsset) => {
     const kind: 'video' | 'audio' = m.type === 'audio' ? 'audio' : 'video'
+    const at = editor.playhead
+    const dur = m.duration_seconds ?? 5
     editor.commit((d) => {
       let data = d
       const sel = data.tracks.find((t) => t.id === editor.selectedTrackId)
@@ -302,14 +371,23 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
       }
       if (!track) {
         data = addTrack(data, kind, 0)
-        track = data.tracks[0]
+        track = data.tracks[data.tracks.length - 1]
       }
-      const dur = m.duration_seconds ?? 5
-      const el =
-        kind === 'video'
-          ? makeVideoClip(m.id, dur, editor.playhead)
-          : makeAudioClip(m.id, dur, editor.playhead)
-      return addClip(data, track.id, el)
+      if (kind === 'audio') {
+        return addClip(data, track.id, makeAudioClip(m.id, dur, at))
+      }
+      // Video: place the picture, then its linked audio companion.
+      const audioTrack = data.tracks.find((t) => t.kind === 'audio')
+      const gid = audioTrack ? makeGroupId() : undefined
+      const vClip = makeVideoClip(m.id, dur, at)
+      if (gid) vClip.groupId = gid
+      data = addClip(data, track.id, vClip)
+      if (audioTrack) {
+        const aClip = makeAudioClip(m.id, dur, at)
+        aClip.groupId = gid
+        data = addClip(data, audioTrack.id, aClip)
+      }
+      return data
     })
     setShowAssets(false)
   }
@@ -356,12 +434,12 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           </button>
           <button
             className="btn small primary"
-            onClick={startRender}
+            onClick={() => setShowExport(true)}
             disabled={renderBusy || !editor.data}
           >
             {renderBusy
               ? `Rendering ${Math.round((renderJob?.progress ?? 0) * 100)}%`
-              : '🎬 Render'}
+              : '🎬 Export'}
           </button>
           {exportsList.map((ex) => (
             <a
@@ -378,21 +456,13 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
       </div>
 
       {showAssets && (
-        <div className="assets-pop">
-          <div className="assets-head">
-            Assets — click to add at playhead
-            {editor.selectedTrackId && <span className="assets-hint"> → selected track</span>}
-          </div>
-          <div className="assets-list">
-            {assets.map((m) => (
-              <button key={m.id} className="asset-item" onClick={() => placeAsset(m)}>
-                <span className="asset-kind">{m.type === 'audio' ? '🔊' : '🎞'}</span>
-                <span className="asset-name">{m.original_filename}</span>
-                <span className="asset-dur">{formatDuration(m.duration_seconds)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <AssetsPanel
+          assets={assets}
+          onPlace={placeAsset}
+          onClose={() => setShowAssets(false)}
+          onRefresh={reloadMedia}
+          hasSelectedTrack={!!editor.selectedTrackId}
+        />
       )}
 
       {(txError || renderError || needConfirmLong) && (
@@ -483,7 +553,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
             />
             <div className="dock-head">
               <span>AI Assistant</span>
-              <button className="dock-x" title="Detach into a floating window" onClick={() => setChatDetached(true)}>
+              <button className="dock-x" title="Detach into a separate window" onClick={detachChat}>
                 ⧉
               </button>
             </div>
@@ -514,7 +584,16 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
         <TimelineView editor={editor} mediaById={mediaById} duration={duration} />
       </div>
 
-      {chatDetached && (
+      {/* Detached into a real separate window: show a small pill to re-dock,
+          since the Attach button also lives in the agent window. */}
+      {chatDetached && !chatFloatingFallback && (
+        <button className="attach-pill" title="Bring the AI assistant back" onClick={attachChat}>
+          ⤓ Attach AI
+        </button>
+      )}
+
+      {/* Fallback when a browser blocked the popup: the old in-app floating panel. */}
+      {chatDetached && chatFloatingFallback && (
         <div
           className="floating-chat"
           style={{ left: chatPos.x, top: chatPos.y, width: chatW }}
@@ -529,7 +608,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
             }}
           >
             <span>AI Assistant</span>
-            <button className="dock-x" title="Dock back" onClick={() => setChatDetached(false)}>
+            <button className="dock-x" title="Dock back" onClick={attachChat}>
               ⤓
             </button>
           </div>
@@ -552,6 +631,16 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
           project={project}
           onCancel={() => setShowImport(false)}
           onImported={handleImported}
+        />
+      )}
+
+      {showExport && (
+        <ExportModal
+          projectId={projectId}
+          projectName={project?.name ?? 'export'}
+          canvas={editor.data?.canvas}
+          onCancel={() => setShowExport(false)}
+          onStarted={onExportStarted}
         />
       )}
     </div>

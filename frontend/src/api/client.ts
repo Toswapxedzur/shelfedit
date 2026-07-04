@@ -44,6 +44,8 @@ export interface MediaAsset {
   height: number | null
   size_bytes: number | null
   description: string | null
+  category: string | null
+  tags: string[]
   created_at: string
 }
 
@@ -92,6 +94,10 @@ export interface AiChange {
   type: string
   keep?: CutKeep[]
   remove?: { start: number; end: number; reason?: string }[]
+  // For type === 'commands': structured editor commands from the action layer.
+  // Typed as unknown[] here to avoid an import cycle with editor/commands.ts;
+  // the AI chat narrows them to EditorCommand[] when dispatching.
+  commands?: unknown[]
 }
 
 export interface AiMessage {
@@ -176,6 +182,10 @@ export interface TimelineElement {
   volume?: number // 0..1, default 1
   audioFadeIn?: number // seconds
   audioFadeOut?: number // seconds
+  // Link ("magnet") group: clips that share a groupId move together and are
+  // highlighted when any one of them is selected (e.g. a video and the audio
+  // split from it, or text pinned over a shot).
+  groupId?: string
 }
 
 export type TrackKind = 'video' | 'audio' | 'text'
@@ -188,11 +198,37 @@ export interface TimelineTrack {
   elements: TimelineElement[]
   muted?: boolean
   volume?: number // 0..1, audio/video tracks
+  // Show/play toggle: when true the track's content is not shown (video/text)
+  // and not played (audio) — in the preview AND the export.
+  hidden?: boolean
+  // Lock: the track's clips can't be moved, trimmed, or edited on the timeline.
+  locked?: boolean
+}
+
+// Project output canvas: compositing resolution + frame rate. Chosen in the
+// create panel; the preview and renderer both use it.
+export interface CanvasSpec {
+  width: number
+  height: number
+  fps: number
 }
 
 export interface TimelineData {
   duration: number
+  canvas?: CanvasSpec
   tracks: TimelineTrack[]
+}
+
+// Export options chosen in the export panel.
+export interface RenderOptions {
+  container: 'mp4' | 'mov' | 'webm'
+  quality: 'high' | 'medium' | 'low'
+  width?: number | null
+  height?: number | null
+  fps?: number | null
+  filename?: string | null
+  // Absolute path from the native save dialog (desktop only).
+  output_path?: string | null
 }
 
 export interface Timeline {
@@ -228,11 +264,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // The desktop shell injects this bridge; it is absent in a plain browser.
 interface PyWebviewBridge {
-  api?: { pick_video_file?: () => Promise<string | null> }
+  api?: {
+    pick_video_file?: () => Promise<string | null>
+    // Native "Save as…" dialog for choosing an export location.
+    pick_save_path?: (suggestedName: string) => Promise<string | null>
+    // Detachable AI agent window (see editor/agentBridge.ts).
+    open_agent_window?: (projectId: string) => Promise<void>
+    close_agent_window?: () => Promise<void>
+    dispatch_to_editor?: (json: string) => Promise<void>
+  }
 }
 declare global {
   interface Window {
     pywebview?: PyWebviewBridge
+    // Globals the desktop shell calls to relay agent-window messages into the
+    // main editor window (set/cleared by editor/agentBridge.ts).
+    __agentDispatch?: (json: string) => void
+    __agentClosed?: () => void
   }
 }
 
@@ -242,15 +290,21 @@ export const desktop = {
     if (!window.pywebview?.api?.pick_video_file) return null
     return window.pywebview.api.pick_video_file()
   },
+  // True when the native "Save as…" dialog is available (desktop shell).
+  canPickSavePath: () => Boolean(window.pywebview?.api?.pick_save_path),
+  pickSavePath: async (suggestedName: string): Promise<string | null> => {
+    if (!window.pywebview?.api?.pick_save_path) return null
+    return window.pywebview.api.pick_save_path(suggestedName)
+  },
 }
 
 export const api = {
   health: () => request<{ status: string; app: string }>('/health'),
   listProjects: () => request<Project[]>('/api/projects'),
-  createProject: (name: string) =>
+  createProject: (name: string, canvas?: CanvasSpec) =>
     request<Project>('/api/projects', {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(canvas ? { name, canvas } : { name }),
     }),
   deleteProject: (id: string) =>
     request<{ id: string; deleted: boolean }>(`/api/projects/${id}`, {
@@ -267,6 +321,14 @@ export const api = {
     }),
   listMedia: (projectId: string) =>
     request<MediaAsset[]>(`/api/projects/${projectId}/media`),
+  updateMedia: (
+    mediaId: string,
+    patch: { category?: string | null; tags?: string[]; description?: string | null },
+  ) =>
+    request<MediaAsset>(`/api/media/${mediaId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   getProject: (id: string) => request<Project>(`/api/projects/${id}`),
   // Cache-busted so a new thumbnail shows after re-import.
   projectThumbnailUrl: (project: Project) =>
@@ -302,8 +364,11 @@ export const api = {
     }),
   getWaveform: (mediaId: string) =>
     request<{ peaks: number[] }>(`/api/media/${mediaId}/waveform`),
-  render: (projectId: string) =>
-    request<Job>(`/api/projects/${projectId}/render`, { method: 'POST' }),
+  render: (projectId: string, options?: RenderOptions) =>
+    request<Job>(`/api/projects/${projectId}/render`, {
+      method: 'POST',
+      body: JSON.stringify(options ?? {}),
+    }),
   getExports: (projectId: string) =>
     request<MediaAsset[]>(`/api/projects/${projectId}/exports`),
   mediaFilmstripUrl: (mediaId: string) => `/api/media/${mediaId}/filmstrip`,
