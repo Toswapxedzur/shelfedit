@@ -14,11 +14,12 @@ interface ModeDef {
 
 // The mode icons. Clicking one switches what the main editor (preview) panel
 // does — the panel renders overlays/handles that match the active mode.
+// Canvas modes: these change what a click/drag on the PREVIEW does. The
+// cursor modes that act on the timeline (select / blade) live in the timeline
+// strip next to zoom instead.
 const MODES: ModeDef[] = [
-  { id: 'select', icon: '⤢', label: 'Select', hint: 'Select & move clips (V)' },
   { id: 'transform', icon: '✥', label: 'Transform', hint: 'Move / scale / rotate on canvas (W)' },
   { id: 'crop', icon: '⛶', label: 'Crop', hint: 'Crop the frame on canvas (C)' },
-  { id: 'blade', icon: '🔪', label: 'Blade', hint: 'Click a clip to split it (B)' },
   { id: 'text', icon: 'T', label: 'Text', hint: 'Click the canvas to add text (X)' },
 ]
 
@@ -95,6 +96,39 @@ export function EditorToolbar({ editor }: Props) {
           title="Flip vertical"
         >
           ⤯
+        </button>
+        <button
+          className="etool-act"
+          onClick={() => editor.run({ type: 'rotateBy', clipIds: selectedIds, degrees: 90 })}
+          disabled={!hasSel}
+          title="Rotate 90°"
+        >
+          ⟳
+        </button>
+        <button
+          className="etool-act"
+          onClick={() => editor.run({ type: 'resetTransform', clipIds: selectedIds })}
+          disabled={!hasSel}
+          title="Reset transform (scale / position / rotation)"
+        >
+          ⊘
+        </button>
+        <div className="etool-sep" />
+        <button
+          className="etool-act"
+          onClick={() => editor.run({ type: 'link', clipIds: selectedIds })}
+          disabled={selectedIds.length < 2}
+          title="Link clips — move together (magnet)"
+        >
+          🔗
+        </button>
+        <button
+          className="etool-act"
+          onClick={() => editor.run({ type: 'unlink', clipIds: selectedIds })}
+          disabled={!hasSel}
+          title="Unlink clips"
+        >
+          ⛓️‍💥
         </button>
         <button
           className={`etool-act ${editor.snapping ? 'on' : ''}`}

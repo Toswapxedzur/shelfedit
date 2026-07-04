@@ -6,6 +6,7 @@ import type {
   TimelineData,
   TimelineElement,
   TimelineTrack,
+  TrackKind,
 } from '../api/client'
 
 export const MIN_CLIP = 0.1 // seconds
@@ -82,6 +83,76 @@ export function moveClip(
   found.el.timeline_start = start
   if (found.el.type === 'text' && found.el.timeline_end != null) {
     found.el.timeline_end += delta
+  }
+  return withDuration(next)
+}
+
+// Is a clip of `elType` allowed to live on a track of `trackKind`?
+// Video clips → video tracks, audio → audio, text → text.
+export function kindCompatible(elType: TimelineElement['type'], trackKind: TrackKind): boolean {
+  return elType === trackKind
+}
+
+// All clip ids linked to `clipId` (its whole magnet group), including itself.
+export function linkedIds(data: TimelineData, clipId: string): string[] {
+  const found = findClip(data, clipId)
+  if (!found || !found.el.groupId) return found ? [clipId] : []
+  const gid = found.el.groupId
+  const ids: string[] = []
+  for (const t of data.tracks) for (const e of t.elements) if (e.groupId === gid) ids.push(e.id)
+  return ids
+}
+
+// Does [start,end) overlap any clip already on `track` (ignoring `excludeIds`)?
+export function rangeOverlaps(
+  track: TimelineTrack,
+  start: number,
+  end: number,
+  excludeIds: Set<string>,
+): boolean {
+  for (const el of track.elements) {
+    if (excludeIds.has(el.id)) continue
+    if (start < clipEnd(el) - 1e-6 && end > el.timeline_start + 1e-6) return true
+  }
+  return false
+}
+
+// Move a clip (and its magnet group) by placing the primary at `newStart`, and
+// optionally onto `targetTrackId`. Linked members keep their own tracks and all
+// shift by the same clamped delta so the group stays locked together.
+export function moveClipGroup(
+  data: TimelineData,
+  clipId: string,
+  newStart: number,
+  targetTrackId?: string,
+): TimelineData {
+  const next = clone(data)
+  const found = findClip(next, clipId)
+  if (!found) return data
+
+  const gid = found.el.groupId
+  const members = gid
+    ? next.tracks.flatMap((t) => t.elements.filter((e) => e.groupId === gid))
+    : [found.el]
+
+  // Clamp the shared delta so no member crosses 0.
+  const rawDelta = Math.max(0, newStart) - found.el.timeline_start
+  const minStart = Math.min(...members.map((m) => m.timeline_start))
+  const delta = Math.max(rawDelta, -minStart)
+
+  for (const m of members) {
+    m.timeline_start = Math.max(0, m.timeline_start + delta)
+    if (m.type === 'text' && m.timeline_end != null) m.timeline_end += delta
+  }
+
+  // Re-home the primary onto another (compatible) track if requested.
+  if (targetTrackId && targetTrackId !== found.track.id) {
+    const target = next.tracks.find((t) => t.id === targetTrackId)
+    if (target && kindCompatible(found.el.type, target.kind)) {
+      found.track.elements = found.track.elements.filter((e) => e.id !== clipId)
+      target.elements.push(found.el)
+      target.elements.sort((a, b) => a.timeline_start - b.timeline_start)
+    }
   }
   return withDuration(next)
 }
@@ -320,6 +391,48 @@ export function setTrackMuted(
   const track = next.tracks.find((t) => t.id === trackId)
   if (track) track.muted = muted
   return next
+}
+
+// Show/play toggle + lock, per track (item 3). `hidden` hides video/text and
+// silences audio, in the preview and the export; `locked` freezes its clips.
+export function setTrackFlags(
+  data: TimelineData,
+  trackId: string,
+  patch: { hidden?: boolean; locked?: boolean },
+): TimelineData {
+  const next = clone(data)
+  const track = next.tracks.find((t) => t.id === trackId)
+  if (track) Object.assign(track, patch)
+  return next
+}
+
+// Link clips into one magnet group (or merge existing groups). A single clip
+// can't be linked to itself, so we need at least two.
+export function linkClips(data: TimelineData, clipIds: string[]): TimelineData {
+  if (clipIds.length < 2) return data
+  const next = clone(data)
+  const gid = newId('grp')
+  const set = new Set(clipIds)
+  for (const t of next.tracks) for (const e of t.elements) if (set.has(e.id)) e.groupId = gid
+  return next
+}
+
+// Break the magnet group(s) that the given clips belong to.
+export function unlinkClips(data: TimelineData, clipIds: string[]): TimelineData {
+  const next = clone(data)
+  const set = new Set(clipIds)
+  const groups = new Set<string>()
+  for (const t of next.tracks)
+    for (const e of t.elements) if (set.has(e.id) && e.groupId) groups.add(e.groupId)
+  for (const t of next.tracks)
+    for (const e of t.elements) if (e.groupId && groups.has(e.groupId)) delete e.groupId
+  return next
+}
+
+// Give a set of clips a fresh shared group id (used when auto-linking A/V on
+// import, or pinning text over a shot). Exposed so callers can build the pair.
+export function makeGroupId(): string {
+  return newId('grp')
 }
 
 // ---- Track operations ----

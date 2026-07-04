@@ -30,6 +30,35 @@ OUT_W = 1280
 OUT_H = 720
 FPS = 30
 
+# CRF (quality) per named preset, for x264/x265-style encoders. Lower = better.
+_QUALITY_CRF = {"high": 18, "medium": 23, "low": 28}
+
+
+@dataclass
+class RenderConfig:
+    """Everything the export panel controls, resolved to concrete values.
+
+    Compositing happens at (width, height) — the project canvas — so text and
+    positions match the live preview exactly. If (out_width, out_height) differ,
+    a single final scale resizes the baked frame to the requested export size.
+    """
+
+    width: int = OUT_W          # compositing canvas (project canvas)
+    height: int = OUT_H
+    fps: int = FPS
+    out_width: int | None = None   # final export size; None → same as canvas
+    out_height: int | None = None
+    container: str = "mp4"      # mp4 | mov | webm
+    crf: int = 20
+
+    @property
+    def export_width(self) -> int:
+        return self.out_width or self.width
+
+    @property
+    def export_height(self) -> int:
+        return self.out_height or self.height
+
 # Matches the compositor's text placement (bottom-anchored, 70px up).
 TEXT_BASELINE_UP = 70
 TEXT_BASE_FONT = 52
@@ -129,12 +158,18 @@ def _find_font() -> str | None:
 
 
 def _render_text_png(
-    text: str, font_size: int, opacity: float, cx: float, cy: float, dest: Path
+    text: str,
+    font_size: int,
+    opacity: float,
+    cx: float,
+    cy: float,
+    dest: Path,
+    cfg: RenderConfig,
 ) -> None:
-    """Draw one text clip onto a transparent 1280x720 PNG (white + black stroke)."""
+    """Draw one text clip onto a transparent canvas-sized PNG (white + stroke)."""
     from PIL import Image, ImageDraw, ImageFont
 
-    img = Image.new("RGBA", (OUT_W, OUT_H), (0, 0, 0, 0))
+    img = Image.new("RGBA", (cfg.width, cfg.height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font_path = _find_font()
     font = (
@@ -161,17 +196,20 @@ def _render_text_png(
 # ---- filter graph construction ----
 
 
-def _video_clip_chain(b: _Build, el: dict, media: MediaInfo, label: str) -> tuple[int, int]:
+def _video_clip_chain(
+    b: _Build, el: dict, media: MediaInfo, label: str, cfg: RenderConfig
+) -> tuple[int, int]:
     """Emit the per-clip filter chain into `b`. Returns overlay offset (x, y)."""
+    out_w, out_h = cfg.width, cfg.height
     s = float(el.get("source_start", 0.0))
     dur = _clip_duration(el)
     e = s + dur
     ts = float(el.get("timeline_start", 0.0))
     te = ts + dur
 
-    vw = media.width or OUT_W
-    vh = media.height or OUT_H
-    fit = min(OUT_W / vw, OUT_H / vh)
+    vw = media.width or out_w
+    vh = media.height or out_h
+    fit = min(out_w / vw, out_h / vh)
     scale, x, y, rot, op = _resolve_transform(el, dur)
     w = max(2, round(vw * fit * scale))
     h = max(2, round(vh * fit * scale))
@@ -198,12 +236,37 @@ def _video_clip_chain(b: _Build, el: dict, media: MediaInfo, label: str) -> tupl
 
     parts.append(f"scale={w}:{h}")
 
-    rw, rh = w, h
+    # Crop as a mask: reveal only a sub-rectangle while keeping the clip's size
+    # and placement. Applied before rotate so the crop rotates with the clip.
+    # `pcx/pcy` is the visible piece's centre offset from the clip centre (in
+    # unrotated local pixels); after rotation that offset rotates too, so the
+    # piece lands exactly where it would if we'd rotated the whole clip.
+    crop = el.get("crop")
+    if crop:
+        cropx = float(crop.get("x", 0) or 0)
+        cropy = float(crop.get("y", 0) or 0)
+        cropw = float(crop.get("w", 1) or 1)
+        croph = float(crop.get("h", 1) or 1)
+        piece_w = max(2, round(cropw * w))
+        piece_h = max(2, round(croph * h))
+        parts.append(
+            f"crop={piece_w}:{piece_h}:{max(0, round(cropx * w))}:{max(0, round(cropy * h))}"
+        )
+        pcx = (cropx + cropw / 2) * w - w / 2
+        pcy = (cropy + croph / 2) * h - h / 2
+    else:
+        piece_w, piece_h = w, h
+        pcx = pcy = 0.0
+
+    rw, rh = piece_w, piece_h
+    rlx, rly = pcx, pcy
     if abs(rot) > 1e-3:
         rad = rot * math.pi / 180
-        rw = math.ceil(abs(w * math.cos(rad)) + abs(h * math.sin(rad)))
-        rh = math.ceil(abs(w * math.sin(rad)) + abs(h * math.cos(rad)))
+        rw = math.ceil(abs(piece_w * math.cos(rad)) + abs(piece_h * math.sin(rad)))
+        rh = math.ceil(abs(piece_w * math.sin(rad)) + abs(piece_h * math.cos(rad)))
         parts.append(f"rotate={rad:.5f}:ow={rw}:oh={rh}:c=black@0.0")
+        rlx = pcx * math.cos(rad) - pcy * math.sin(rad)
+        rly = pcx * math.sin(rad) + pcy * math.cos(rad)
 
     if op < 0.999:
         parts.append(f"colorchannelmixer=aa={op:.3f}")
@@ -217,17 +280,20 @@ def _video_clip_chain(b: _Build, el: dict, media: MediaInfo, label: str) -> tupl
 
     b.filters.append(",".join(parts) + f"[{label}]")
 
-    cx = OUT_W / 2 + x * OUT_W
-    cy = OUT_H / 2 + y * OUT_H
-    off_x = round(cx - rw / 2)
-    off_y = round(cy - rh / 2)
+    cx = out_w / 2 + x * out_w
+    cy = out_h / 2 + y * out_h
+    off_x = round(cx + rlx - rw / 2)
+    off_y = round(cy + rly - rh / 2)
     return off_x, off_y
 
 
 def _iter_video_clips_bottom_up(tracks: list[dict]):
-    """Yield (track, clip) in compositing order: bottom track first, top last."""
+    """Yield (track, clip) in compositing order: bottom track first, top last.
+
+    Hidden tracks (the show/hide toggle) contribute nothing to the export.
+    """
     for track in reversed(tracks):
-        if track.get("kind") == "video":
+        if track.get("kind") == "video" and not track.get("hidden"):
             for el in track.get("elements", []):
                 if el.get("media_id"):
                     yield track, el
@@ -235,16 +301,20 @@ def _iter_video_clips_bottom_up(tracks: list[dict]):
 
 def _iter_text_clips_bottom_up(tracks: list[dict]):
     for track in reversed(tracks):
-        if track.get("kind") == "text":
+        if track.get("kind") == "text" and not track.get("hidden"):
             for el in track.get("elements", []):
                 if (el.get("text") or "").strip():
                     yield track, el
 
 
 def _pick_audio_track(tracks: list[dict], media_map: dict[str, MediaInfo]) -> dict | None:
-    """Bottom-most non-muted video track that has an audio-bearing clip."""
+    """Bottom-most audible video track that has an audio-bearing clip.
+
+    Fallback used only for timelines that have no dedicated audio tracks (e.g.
+    a single video dropped straight onto a video track).
+    """
     for track in reversed(tracks):
-        if track.get("kind") != "video" or track.get("muted"):
+        if track.get("kind") != "video" or track.get("muted") or track.get("hidden"):
             continue
         for el in track.get("elements", []):
             mi = media_map.get(el.get("media_id", ""))
@@ -254,9 +324,14 @@ def _pick_audio_track(tracks: list[dict], media_map: dict[str, MediaInfo]) -> di
 
 
 def build_render(
-    data: dict, media_map: dict[str, MediaInfo], text_dir: Path
+    data: dict,
+    media_map: dict[str, MediaInfo],
+    text_dir: Path,
+    cfg: RenderConfig | None = None,
 ) -> tuple[list[str], str, str | None, float]:
     """Build (input_args, filter_complex, audio_label_or_None, duration)."""
+    cfg = cfg or RenderConfig()
+    out_w, out_h, fps = cfg.width, cfg.height, cfg.fps
     tracks = data.get("tracks", [])
 
     duration = float(data.get("duration", 0) or 0)
@@ -279,25 +354,35 @@ def build_render(
             raise FFmpegError(f"Source media missing for clip {el.get('id')}")
         el["_in"] = b.add_input("-i", mi.path)
 
+    # Register a decode input for every audio-track clip too, so audio placed on
+    # dedicated audio tracks (the A/V split) can be mixed into the export.
+    for track in tracks:
+        if track.get("kind") != "audio":
+            continue
+        for el in track.get("elements", []):
+            mi = media_map.get(el.get("media_id", ""))
+            if mi and mi.has_audio and Path(mi.path).exists():
+                el["_in"] = b.add_input("-i", mi.path)
+
     # Base black canvas.
     b.filters.append(
-        f"color=c=black:s={OUT_W}x{OUT_H}:r={FPS}:d={duration:.3f}[bg]"
+        f"color=c=black:s={out_w}x{out_h}:r={fps}:d={duration:.3f}[bg]"
     )
     cur = "[bg]"
 
     # Video layers, bottom track first.
     for n, (_track, el) in enumerate(video_clips):
         mi = media_map[el["media_id"]]
-        off_x, off_y = _video_clip_chain(b, el, mi, f"vc{n}")
+        off_x, off_y = _video_clip_chain(b, el, mi, f"vc{n}", cfg)
         ts = float(el.get("timeline_start", 0.0))
         te = ts + _clip_duration(el)
         mask = el.get("mask")
         if mask:
-            mx = round(float(mask.get("x", 0)) * OUT_W)
-            my = round(float(mask.get("y", 0)) * OUT_H)
-            mw = max(2, round(float(mask.get("w", 1)) * OUT_W))
-            mh = max(2, round(float(mask.get("h", 1)) * OUT_H))
-            b.filters.append(f"color=c=black@0.0:s={OUT_W}x{OUT_H}:r={FPS}[tb{n}]")
+            mx = round(float(mask.get("x", 0)) * out_w)
+            my = round(float(mask.get("y", 0)) * out_h)
+            mw = max(2, round(float(mask.get("w", 1)) * out_w))
+            mh = max(2, round(float(mask.get("h", 1)) * out_h))
+            b.filters.append(f"color=c=black@0.0:s={out_w}x{out_h}:r={fps}[tb{n}]")
             b.filters.append(f"[tb{n}][vc{n}]overlay=x={off_x}:y={off_y}:format=auto[full{n}]")
             b.filters.append(f"[full{n}]crop={mw}:{mh}:{mx}:{my}[mp{n}]")
             b.filters.append(
@@ -318,10 +403,10 @@ def build_render(
         te = ts + dur
         scale, x, y, _rot, op = _resolve_transform(el, dur)
         font_size = max(8, round(TEXT_BASE_FONT * scale))
-        cx = OUT_W / 2 + x * OUT_W
-        cy = OUT_H - TEXT_BASELINE_UP + y * OUT_H
+        cx = out_w / 2 + x * out_w
+        cy = out_h - TEXT_BASELINE_UP + y * out_h
         png = text_dir / f"text_{m}.png"
-        _render_text_png(el["text"], font_size, op, cx, cy, png)
+        _render_text_png(el["text"], font_size, op, cx, cy, png, cfg)
         in_idx = b.add_input("-loop", "1", "-t", f"{dur:.3f}", "-i", str(png))
 
         parts = [f"[{in_idx}:v]format=rgba", f"setpts=PTS-STARTPTS+{ts:.3f}/TB"]
@@ -338,8 +423,13 @@ def build_render(
         )
         cur = f"[tstg{m}]"
 
-    # Final video: force yuv420p for broad playback.
-    b.filters.append(f"{cur}format=yuv420p[vout]")
+    # Final video: optionally resize to the requested export size, then force
+    # yuv420p for broad playback.
+    ew, eh = cfg.export_width, cfg.export_height
+    if (ew, eh) != (out_w, out_h):
+        b.filters.append(f"{cur}scale={ew}:{eh},format=yuv420p[vout]")
+    else:
+        b.filters.append(f"{cur}format=yuv420p[vout]")
 
     # Audio from the bottom-most non-muted video track.
     audio_label = _build_audio(b, tracks, media_map)
@@ -350,11 +440,35 @@ def build_render(
 def _build_audio(
     b: _Build, tracks: list[dict], media_map: dict[str, MediaInfo]
 ) -> str | None:
-    track = _pick_audio_track(tracks, media_map)
-    if track is None:
-        return None
-    track_vol = float(track.get("volume", 1) or 1)
+    # Prefer dedicated audio tracks (the A/V split). Muted or hidden audio
+    # tracks are silent, so toggling them is reflected in the export. Only when
+    # the timeline has NO audio tracks at all do we fall back to pulling audio
+    # from the bottom-most audible video track.
+    audio_tracks = [t for t in tracks if t.get("kind") == "audio"]
+    if audio_tracks:
+        source_tracks = [t for t in audio_tracks if not t.get("muted") and not t.get("hidden")]
+    else:
+        fallback = _pick_audio_track(tracks, media_map)
+        source_tracks = [fallback] if fallback else []
+
     labels: list[str] = []
+    for track in source_tracks:
+        _append_track_audio(b, track, media_map, labels)
+
+    if not labels:
+        return None
+    if len(labels) == 1:
+        b.filters.append(f"[{labels[0]}]anull[aout]")
+    else:
+        joined = "".join(f"[{lbl}]" for lbl in labels)
+        b.filters.append(f"{joined}amix=inputs={len(labels)}:normalize=0[aout]")
+    return "[aout]"
+
+
+def _append_track_audio(
+    b: _Build, track: dict, media_map: dict[str, MediaInfo], labels: list[str]
+) -> None:
+    track_vol = float(track.get("volume", 1) or 1)
     for el in track.get("elements", []):
         mi = media_map.get(el.get("media_id", ""))
         if not mi or not mi.has_audio or "_in" not in el:
@@ -379,35 +493,37 @@ def _build_audio(
         b.filters.append(",".join(parts) + f"[{lbl}]")
         labels.append(lbl)
 
-    if not labels:
-        return None
-    if len(labels) == 1:
-        b.filters.append(f"[{labels[0]}]anull[aout]")
-    else:
-        joined = "".join(f"[{lbl}]" for lbl in labels)
-        b.filters.append(f"{joined}amix=inputs={len(labels)}:normalize=0[aout]")
-    return "[aout]"
-
 
 def build_command(
     input_args: list[str],
     filter_complex: str,
     audio_label: str | None,
     output_path: Path,
+    cfg: RenderConfig | None = None,
 ) -> list[str]:
+    cfg = cfg or RenderConfig()
     cmd = ["ffmpeg", "-y", *input_args, "-filter_complex", filter_complex, "-map", "[vout]"]
     if audio_label:
         cmd += ["-map", audio_label]
-    cmd += [
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-    ]
-    if audio_label:
-        cmd += ["-c:a", "aac", "-b:a", "160k"]
-    cmd += [
-        "-movflags", "+faststart",
-        str(output_path),
-        "-progress", "pipe:1", "-nostats",
-    ]
+
+    if cfg.container == "webm":
+        cmd += [
+            "-c:v", "libvpx-vp9", "-crf", str(cfg.crf), "-b:v", "0",
+            "-pix_fmt", "yuv420p",
+        ]
+        if audio_label:
+            cmd += ["-c:a", "libopus", "-b:a", "160k"]
+        tail = []  # webm needs no faststart
+    else:  # mp4 / mov → H.264 + AAC
+        cmd += [
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(cfg.crf),
+            "-pix_fmt", "yuv420p",
+        ]
+        if audio_label:
+            cmd += ["-c:a", "aac", "-b:a", "160k"]
+        tail = ["-movflags", "+faststart"]
+
+    cmd += ["-r", str(cfg.fps), *tail, str(output_path), "-progress", "pipe:1", "-nostats"]
     return cmd
 
 
@@ -427,18 +543,20 @@ def render_timeline(
     media_map: dict[str, MediaInfo],
     output_path: Path,
     *,
+    cfg: RenderConfig | None = None,
     on_progress: Callable[[float], None] | None = None,
 ) -> Path:
     """Bake the full timeline (video + effects + text + audio) to output_path."""
     if not ffmpeg_available():
         raise FFmpegError("ffmpeg not found on PATH")
 
+    cfg = cfg or RenderConfig()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="shelfedit_render_") as tmp:
         input_args, filter_complex, audio_label, duration = build_render(
-            data, media_map, Path(tmp)
+            data, media_map, Path(tmp), cfg
         )
-        cmd = build_command(input_args, filter_complex, audio_label, output_path)
+        cmd = build_command(input_args, filter_complex, audio_label, output_path, cfg)
 
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True

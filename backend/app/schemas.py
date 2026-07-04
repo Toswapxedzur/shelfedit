@@ -24,9 +24,36 @@ from .models import (
 )
 
 
+class CanvasSpec(BaseModel):
+    """The project's output canvas: compositing resolution + frame rate."""
+
+    width: int = Field(default=1280, ge=16, le=7680)
+    height: int = Field(default=720, ge=16, le=4320)
+    fps: int = Field(default=30, ge=1, le=120)
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     storage_mode: StorageMode = StorageMode.local_only
+    # Optional project setup chosen in the create panel. When given, the
+    # initial timeline is seeded with this canvas.
+    canvas: CanvasSpec | None = None
+
+
+class RenderRequest(BaseModel):
+    """Export options chosen in the export panel."""
+
+    container: str = Field(default="mp4", pattern="^(mp4|mov|webm)$")
+    quality: str = Field(default="high", pattern="^(high|medium|low)$")
+    # Final output resolution / fps. None → use the project canvas.
+    width: int | None = Field(default=None, ge=16, le=7680)
+    height: int | None = Field(default=None, ge=16, le=4320)
+    fps: int | None = Field(default=None, ge=1, le=120)
+    # Base filename (no extension) when saving into the project folder.
+    filename: str | None = Field(default=None, max_length=200)
+    # Absolute path chosen via the native save dialog. When set, the render is
+    # written there instead of the project's renders folder.
+    output_path: str | None = Field(default=None, max_length=1024)
 
 
 class ProjectUpdate(BaseModel):
@@ -81,7 +108,17 @@ class MediaRead(BaseModel):
     height: int | None
     size_bytes: int | None
     description: str | None
+    # Asset-library classification: a single editable category + free-form tags.
+    category: str | None = None
+    tags: list[str] = []
     created_at: datetime
+
+
+class MediaClassifyRequest(BaseModel):
+    # Any subset may be provided; omitted fields are left unchanged.
+    category: str | None = None
+    tags: list[str] | None = None
+    description: str | None = None
 
 
 class TranscribeRequest(BaseModel):

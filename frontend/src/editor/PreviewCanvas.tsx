@@ -29,11 +29,12 @@ interface Props {
   onAddText: (at: number, x: number, y: number) => void
 }
 
-const CANVAS_W = 1280
-const CANVAS_H = 720
+const DEFAULT_CANVAS_W = 1280
+const DEFAULT_CANVAS_H = 720
 const HANDLE = 16 // half-size of a transform/crop handle, in canvas-internal px
 
 // Displayed rectangle of a (possibly cropped) frame, in canvas-internal coords.
+// `canvasW/canvasH` are the project canvas dimensions (they set the aspect).
 function displayedRect(
   fw: number,
   fh: number,
@@ -41,16 +42,18 @@ function displayedRect(
   x: number,
   y: number,
   crop: MaskRect | null,
+  canvasW: number,
+  canvasH: number,
 ) {
   const cw = crop ? crop.w * fw : fw
   const ch = crop ? crop.h * fh : fh
   const sx = crop ? crop.x * fw : 0
   const sy = crop ? crop.y * fh : 0
-  const fit = Math.min(CANVAS_W / cw, CANVAS_H / ch)
+  const fit = Math.min(canvasW / cw, canvasH / ch)
   const w = cw * fit * scale
   const h = ch * fit * scale
-  const cx = CANVAS_W / 2 + x * CANVAS_W
-  const cy = CANVAS_H / 2 + y * CANVAS_H
+  const cx = canvasW / 2 + x * canvasW
+  const cy = canvasH / 2 + y * canvasH
   return { cx, cy, w, h, cw, ch, sx, sy }
 }
 
@@ -130,6 +133,15 @@ export function PreviewCanvas({
   const timecodeRef = useRef<HTMLSpanElement>(null)
   const hudRef = useRef<HTMLDivElement>(null)
 
+  // Project canvas dimensions (drive the preview aspect + drawing math). Kept
+  // in refs so the rAF draw loop and pointer handlers read the current values.
+  const canvasW = data.canvas?.width ?? DEFAULT_CANVAS_W
+  const canvasH = data.canvas?.height ?? DEFAULT_CANVAS_H
+  const cwRef = useRef(canvasW)
+  const chRef = useRef(canvasH)
+  cwRef.current = canvasW
+  chRef.current = canvasH
+
   // Live mode/selection + active pointer gesture, read by the draw loop.
   const modeRef = useRef(mode)
   const selectedIdRef = useRef(selectedId)
@@ -192,6 +204,7 @@ export function PreviewCanvas({
     const videos: TimelineElement[] = []
     const texts: TimelineElement[] = []
     for (const track of [...d.tracks].reverse()) {
+      if (track.hidden) continue // show/hide toggle — mirrors the export
       for (const el of track.elements) {
         if (t >= el.timeline_start && t < clipEnd(el)) {
           if (track.kind === 'video') videos.push(el)
@@ -218,7 +231,7 @@ export function PreviewCanvas({
     ctx.globalAlpha = 1
     ctx.filter = 'none'
     ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+    ctx.fillRect(0, 0, cwRef.current, chRef.current)
 
     const t = playheadRef.current
     const curMode = modeRef.current
@@ -242,20 +255,24 @@ export function PreviewCanvas({
       const y = gt ? gt.y : p.y
       const rotation = gt ? gt.rotation : p.rotation
       const gcrop = g && g.kind === 'crop' ? g.live.crop : el.crop ?? null
-      // While cropping the selected clip, show the whole frame so the user can
-      // drag the crop box against the full picture.
-      const cropForDraw = curMode === 'crop' && el.id === selId ? null : gcrop
+      // Crop is a MASK: it never changes the clip's size/position/rotation — it
+      // only reveals a sub-rectangle of the frame, clipped in the clip's own
+      // (rotated/flipped) local space so it rotates with the clip. While the
+      // user is actively cropping the selected clip we reveal the whole frame so
+      // they can drag the box against the full picture.
+      const cropMask = curMode === 'crop' && el.id === selId ? null : gcrop
 
-      const r = displayedRect(frame.width, frame.height, scale, x, y, cropForDraw)
+      // Always the full (uncropped) displayed rect — crop no longer resizes.
+      const r = displayedRect(frame.width, frame.height, scale, x, y, null, cwRef.current, chRef.current)
 
       ctx.save()
       if (el.mask) {
         ctx.beginPath()
         ctx.rect(
-          el.mask.x * CANVAS_W,
-          el.mask.y * CANVAS_H,
-          el.mask.w * CANVAS_W,
-          el.mask.h * CANVAS_H,
+          el.mask.x * cwRef.current,
+          el.mask.y * chRef.current,
+          el.mask.w * cwRef.current,
+          el.mask.h * chRef.current,
         )
         ctx.clip()
       }
@@ -263,6 +280,16 @@ export function PreviewCanvas({
       ctx.translate(r.cx, r.cy)
       if (rotation) ctx.rotate((rotation * Math.PI) / 180)
       if (el.flipH || el.flipV) ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1)
+      if (cropMask) {
+        ctx.beginPath()
+        ctx.rect(
+          -r.w / 2 + cropMask.x * r.w,
+          -r.h / 2 + cropMask.y * r.h,
+          cropMask.w * r.w,
+          cropMask.h * r.h,
+        )
+        ctx.clip()
+      }
 
       if (el.chroma?.enabled) {
         const c = el.color
@@ -318,8 +345,8 @@ export function PreviewCanvas({
 
       ctx.save()
       ctx.globalAlpha = p.opacity
-      const cx = CANVAS_W / 2 + p.x * CANVAS_W
-      const cy = CANVAS_H - 70 + p.y * CANVAS_H
+      const cx = cwRef.current / 2 + p.x * cwRef.current
+      const cy = chRef.current - 70 + p.y * chRef.current
       ctx.translate(cx, cy)
       if (p.rotation) ctx.rotate((p.rotation * Math.PI) / 180)
       const fontSize = Math.max(8, Math.round(52 * p.scale))
@@ -354,7 +381,7 @@ export function PreviewCanvas({
         ctx.filter = 'none'
 
         if (curMode === 'transform') {
-          const rr = displayedRect(frame.width, frame.height, scale, x, y, el.crop ?? null)
+          const rr = displayedRect(frame.width, frame.height, scale, x, y, null, cwRef.current, chRef.current)
           ctx.save()
           ctx.translate(rr.cx, rr.cy)
           ctx.rotate((rotation * Math.PI) / 180)
@@ -375,20 +402,24 @@ export function PreviewCanvas({
           for (const [hx, hy] of corners) drawHandle(ctx, hx, hy)
           ctx.restore()
         } else {
+          // Crop box drawn in the clip's rotated local space, so it rotates with
+          // the clip. Local frame spans [-w/2..w/2] x [-h/2..h/2].
           const gcrop = g && g.kind === 'crop' ? g.live.crop : el.crop ?? { x: 0, y: 0, w: 1, h: 1 }
-          const full = displayedRect(frame.width, frame.height, scale, x, y, null)
-          const left = full.cx - full.w / 2
-          const top = full.cy - full.h / 2
-          const rx = left + gcrop.x * full.w
-          const ry = top + gcrop.y * full.h
+          const full = displayedRect(frame.width, frame.height, scale, x, y, null, cwRef.current, chRef.current)
+          const lx = -full.w / 2
+          const ty = -full.h / 2
+          const rx = lx + gcrop.x * full.w
+          const ry = ty + gcrop.y * full.h
           const rw = gcrop.w * full.w
           const rh = gcrop.h * full.h
           ctx.save()
+          ctx.translate(full.cx, full.cy)
+          ctx.rotate((rotation * Math.PI) / 180)
           ctx.fillStyle = 'rgba(0,0,0,0.5)'
-          ctx.fillRect(left, top, full.w, ry - top)
-          ctx.fillRect(left, ry + rh, full.w, top + full.h - (ry + rh))
-          ctx.fillRect(left, ry, rx - left, rh)
-          ctx.fillRect(rx + rw, ry, left + full.w - (rx + rw), rh)
+          ctx.fillRect(lx, ty, full.w, ry - ty)
+          ctx.fillRect(lx, ry + rh, full.w, ty + full.h - (ry + rh))
+          ctx.fillRect(lx, ry, rx - lx, rh)
+          ctx.fillRect(rx + rw, ry, lx + full.w - (rx + rw), rh)
           ctx.strokeStyle = '#ffd24a'
           ctx.lineWidth = 2
           ctx.strokeRect(rx, ry, rw, rh)
@@ -417,8 +448,8 @@ export function PreviewCanvas({
     const rect = canvas?.getBoundingClientRect()
     if (!rect || rect.width === 0) return null
     return {
-      ix: (clientX - rect.left) * (CANVAS_W / rect.width),
-      iy: (clientY - rect.top) * (CANVAS_H / rect.height),
+      ix: (clientX - rect.left) * (cwRef.current / rect.width),
+      iy: (clientY - rect.top) * (chRef.current / rect.height),
     }
   }
 
@@ -432,7 +463,7 @@ export function PreviewCanvas({
       const frame = engine.frameFor(el)
       if (!frame || !frame.width) continue
       const p = resolveProps(el, t - el.timeline_start, clipDuration(el))
-      const rr = displayedRect(frame.width, frame.height, p.scale, p.x, p.y, el.crop ?? null)
+      const rr = displayedRect(frame.width, frame.height, p.scale, p.x, p.y, el.crop ?? null, cwRef.current, chRef.current)
       const loc = toLocal(ix, iy, rr.cx, rr.cy, p.rotation)
       if (Math.abs(loc.lx) <= rr.w / 2 && Math.abs(loc.ly) <= rr.h / 2) return el
     }
@@ -448,7 +479,7 @@ export function PreviewCanvas({
     const engine = getEngine()
 
     if (m === 'text') {
-      onAddText(t, (ix - CANVAS_W / 2) / CANVAS_W, (iy - (CANVAS_H - 70)) / CANVAS_H)
+      onAddText(t, (ix - cwRef.current / 2) / cwRef.current, (iy - (chRef.current - 70)) / chRef.current)
       return
     }
     if (m === 'select') {
@@ -468,7 +499,7 @@ export function PreviewCanvas({
     const baseT: Transform = { scale: p.scale, x: p.x, y: p.y, rotation: p.rotation }
 
     if (m === 'transform') {
-      const rr = displayedRect(frame.width, frame.height, baseT.scale, baseT.x, baseT.y, active.crop ?? null)
+      const rr = displayedRect(frame.width, frame.height, baseT.scale, baseT.x, baseT.y, null, cwRef.current, chRef.current)
       const loc = toLocal(ix, iy, rr.cx, rr.cy, baseT.rotation)
       const onCorner =
         Math.abs(Math.abs(loc.lx) - rr.w / 2) <= HANDLE &&
@@ -496,12 +527,13 @@ export function PreviewCanvas({
         live: { transform: { ...baseT } },
       }
     } else {
-      const full = displayedRect(frame.width, frame.height, baseT.scale, baseT.x, baseT.y, null)
+      const full = displayedRect(frame.width, frame.height, baseT.scale, baseT.x, baseT.y, null, cwRef.current, chRef.current)
       const baseCrop: MaskRect = active.crop ?? { x: 0, y: 0, w: 1, h: 1 }
-      const left = full.cx - full.w / 2
-      const top = full.cy - full.h / 2
-      const fx = (ix - left) / full.w
-      const fy = (iy - top) / full.h
+      // Map the pointer into the clip's rotated local frame so the crop box
+      // hit-tests correctly on a rotated clip.
+      const cloc = toLocal(ix, iy, full.cx, full.cy, baseT.rotation)
+      const fx = (cloc.lx + full.w / 2) / full.w
+      const fy = (cloc.ly + full.h / 2) / full.h
       const thrX = HANDLE / full.w
       const thrY = HANDLE / full.h
       const edges = {
@@ -534,8 +566,8 @@ export function PreviewCanvas({
       if (g.kind === 'move') {
         g.live.transform = {
           ...g.base,
-          x: g.base.x + (q.ix - g.startX) / CANVAS_W,
-          y: g.base.y + (q.iy - g.startY) / CANVAS_H,
+          x: g.base.x + (q.ix - g.startX) / cwRef.current,
+          y: g.base.y + (q.iy - g.startY) / chRef.current,
         }
       } else if (g.kind === 'scale') {
         const d = Math.hypot(q.ix - g.cx, q.iy - g.cy)
@@ -554,11 +586,10 @@ export function PreviewCanvas({
         const frame2 = active2 ? engine2.frameFor(active2) : null
         if (!active2 || !frame2 || !frame2.width) return
         const pp = resolveProps(active2, playheadRef.current - active2.timeline_start, clipDuration(active2))
-        const full = displayedRect(frame2.width, frame2.height, pp.scale, pp.x, pp.y, null)
-        const left = full.cx - full.w / 2
-        const top = full.cy - full.h / 2
-        const fx = Math.max(0, Math.min(1, (q.ix - left) / full.w))
-        const fy = Math.max(0, Math.min(1, (q.iy - top) / full.h))
+        const full = displayedRect(frame2.width, frame2.height, pp.scale, pp.x, pp.y, null, cwRef.current, chRef.current)
+        const mloc = toLocal(q.ix, q.iy, full.cx, full.cy, pp.rotation)
+        const fx = Math.max(0, Math.min(1, (mloc.lx + full.w / 2) / full.w))
+        const fy = Math.max(0, Math.min(1, (mloc.ly + full.h / 2) / full.h))
         let x0 = g.base.x
         let y0 = g.base.y
         let x1 = g.base.x + g.base.w
@@ -615,6 +646,11 @@ export function PreviewCanvas({
     // Warm all sources so playback doesn't stall on cold (uncached) media.
     engine.prepareAll()
     if (!playingRef.current) {
+      // Redraw NOW with the frame already on screen so edits that don't move the
+      // playhead (transform / crop / flip / color) show immediately — they don't
+      // need a re-decode. Then refresh the decoded frame only if it actually
+      // changed (the seek is frame-gated, so same-frame edits are a no-op).
+      drawFrameRef.current()
       void engine.seekTo(playheadRef.current).then(() => drawFrameRef.current())
     }
   }, [data, duration, getEngine])
@@ -705,8 +741,8 @@ export function PreviewCanvas({
       <div className="canvas-wrap">
         <canvas
           ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
+          width={canvasW}
+          height={canvasH}
           className={`stage-canvas mode-${mode}`}
           onPointerDown={onCanvasPointerDown}
         />
