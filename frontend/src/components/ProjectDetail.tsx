@@ -181,6 +181,24 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
   )
   const video = media.find((m) => m.type === 'video')
 
+  // media_ids whose optimized preview proxy is ready (preview decodes those).
+  const readyProxyIds = useMemo(
+    () => media.filter((m) => m.type === 'video' && m.proxy_ready).map((m) => m.id),
+    [media],
+  )
+
+  // While any video is still building its proxy, poll so the editor can switch
+  // to it as soon as it's ready (first play uses the original; later plays the
+  // smooth proxy). Stops polling once every video has a proxy.
+  useEffect(() => {
+    const pending = media.some((m) => m.type === 'video' && !m.proxy_ready)
+    if (!pending) return
+    const id = window.setInterval(() => {
+      void reloadMedia()
+    }, 4000)
+    return () => window.clearInterval(id)
+  }, [media, reloadMedia])
+
   // Auto-populate the timeline with the imported video (+ its audio).
   useEffect(() => {
     if (!editor.data || !video) return
@@ -536,6 +554,7 @@ export function ProjectDetail({ projectId, onBack, onChanged }: Props) {
                 editor.run({ type: 'setProps', clipIds: [id], patch: { crop } })
               }
               onAddText={(at, x, y) => editor.run({ type: 'addText', at, x, y })}
+              readyProxyIds={readyProxyIds}
             />
           ) : (
             <div className="editor-loading">Loading timeline…</div>

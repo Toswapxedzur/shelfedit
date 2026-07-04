@@ -46,6 +46,7 @@ export interface MediaAsset {
   description: string | null
   category: string | null
   tags: string[]
+  proxy_ready: boolean
   created_at: string
 }
 
@@ -334,6 +335,10 @@ export const api = {
   projectThumbnailUrl: (project: Project) =>
     `/api/projects/${project.id}/thumbnail?v=${encodeURIComponent(project.updated_at)}`,
   mediaFileUrl: (mediaId: string) => `/api/media/${mediaId}/file`,
+  // The preview decodes this: an optimized proxy when ready, else the original.
+  mediaPreviewUrl: (mediaId: string) => `/api/media/${mediaId}/preview`,
+  getProxyStatus: (mediaId: string) =>
+    request<{ ready: boolean }>(`/api/media/${mediaId}/proxy`),
   mediaThumbnailUrl: (mediaId: string) => `/api/media/${mediaId}/thumbnail`,
   transcribe: (projectId: string, confirmLong = false) =>
     request<Job>(`/api/projects/${projectId}/transcribe`, {

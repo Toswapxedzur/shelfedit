@@ -223,6 +223,16 @@ class MediaAsset(SQLModel, table=True):
         return {"category": None, "tags": []}
 
     @property
+    def proxy_ready(self) -> bool:
+        """True once the optimized preview proxy has been fully generated."""
+        from .utils import paths
+
+        try:
+            return paths.proxy_path(self.project_id, self.id).exists()
+        except Exception:  # noqa: BLE001 — never let a status check break reads
+            return False
+
+    @property
     def category(self) -> str | None:
         return self._classification()["category"]
 

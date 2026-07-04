@@ -78,6 +78,52 @@ def _warm_derived(media_id: str, src_path: str, project_id: str, duration: float
             pass
 
 
+# The preview proxy is an optimized, downscaled, constant-frame-rate H.264 copy
+# that the in-app preview decodes instead of the (possibly huge / VFR / heavy)
+# original. Transcoding is expensive and full-file, so it runs once on a daemon
+# thread, guarded so a media_id is only ever transcoded by one worker at a time.
+_proxy_threads: set[str] = set()
+_proxy_guard = threading.Lock()
+
+
+def _ensure_proxy(media_id: str, src: Path, project_id: str) -> Path:
+    dest = paths.proxy_path(project_id, media_id)
+    if dest.exists():
+        return dest
+    with _lock_for(f"proxy:{dest}"):
+        if not dest.exists():
+            ffmpeg.generate_proxy(src, dest)
+    return dest
+
+
+def _start_proxy(media_id: str, src_path: str, project_id: str) -> bool:
+    """Kick off proxy generation on a daemon thread if not already done/running.
+
+    Returns True if the proxy already exists (ready now), else False.
+    """
+    if paths.proxy_path(project_id, media_id).exists():
+        return True
+    src = Path(src_path)
+    if not src.exists():
+        return False
+    with _proxy_guard:
+        if media_id in _proxy_threads:
+            return False
+        _proxy_threads.add(media_id)
+
+    def _run() -> None:
+        try:
+            _ensure_proxy(media_id, src, project_id)
+        except Exception:  # noqa: BLE001 — best-effort; preview falls back to original
+            pass
+        finally:
+            with _proxy_guard:
+                _proxy_threads.discard(media_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return False
+
+
 @router.post(
     "/api/projects/{project_id}/media/import",
     response_model=MediaRead,
@@ -125,6 +171,8 @@ def import_media(
         asset.project_id,
         asset.duration_seconds or 0.0,
     )
+    # Start building the optimized preview proxy so the first play is smooth.
+    _start_proxy(asset.id, asset.local_path, asset.project_id)
     return asset
 
 
@@ -211,6 +259,46 @@ def get_media_file(media_id: str):
         raise HTTPException(status_code=404, detail="Media file missing")
     media_type = _VIDEO_MIME.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(path, media_type=media_type, filename=original)
+
+
+@router.get("/api/media/{media_id}/preview")
+def get_media_preview(media_id: str):
+    """Stream the file the preview should decode.
+
+    Serves the optimized proxy when it is ready; otherwise serves the original
+    (so playback always works) and kicks off proxy generation in the background
+    so subsequent plays are smooth.
+    """
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Media not found")
+        original = Path(asset.local_path)
+        original_name = asset.original_filename
+        project_id = asset.project_id
+
+    proxy = paths.proxy_path(project_id, media_id)
+    if proxy.exists():
+        return FileResponse(proxy, media_type="video/mp4", filename=f"{media_id}.mp4")
+
+    if not original.exists():
+        raise HTTPException(status_code=404, detail="Media file missing")
+    _start_proxy(media_id, str(original), project_id)
+    media_type = _VIDEO_MIME.get(original.suffix.lower(), "application/octet-stream")
+    return FileResponse(original, media_type=media_type, filename=original_name)
+
+
+@router.get("/api/media/{media_id}/proxy")
+def get_media_proxy_status(media_id: str):
+    """Report proxy readiness (and ensure generation has started)."""
+    with Session(engine) as session:
+        asset = session.get(MediaAsset, media_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Media not found")
+        local_path = asset.local_path
+        project_id = asset.project_id
+    ready = _start_proxy(media_id, local_path, project_id)
+    return {"ready": ready}
 
 
 @router.get("/api/media/{media_id}/filmstrip")
