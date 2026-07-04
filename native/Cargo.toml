@@ -1,0 +1,24 @@
+[package]
+name = "shelfedit-native"
+version = "0.1.0"
+edition = "2021"
+description = "ShelfEdit native (Rust) video editor — Slice 1 efficiency proof"
+
+[[bin]]
+name = "shelfedit"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.29", features = ["wgpu"] }
+egui = "0.29"
+cpal = "0.15"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+dirs = "5"
+env_logger = "0.11"
+log = "0.4"
+
+[profile.release]
+opt-level = 3
