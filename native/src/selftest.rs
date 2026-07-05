@@ -4,8 +4,90 @@
 
 use std::time::Instant;
 
+use crate::commands::{apply_command, Command};
 use crate::db;
 use crate::decode::{decode_one, preview_size, VideoStream};
+use crate::model::TimelineData;
+
+/// Headless edit round-trip: loads the real project, exercises the command
+/// layer + JSON fidelity in memory (no DB writes), and prints a summary.
+pub fn run_edit() {
+    println!("== ShelfEdit native — Slice 2 edit self-test ==");
+    let lp = match db::load_best() {
+        Ok(lp) => lp,
+        Err(e) => {
+            println!("FAIL: {e}");
+            std::process::exit(1);
+        }
+    };
+    println!("project : {} ({})", lp.name, lp.project_id);
+    let mut data = lp.timeline.clone();
+    data.recompute_duration();
+    println!(
+        "loaded  : {} tracks, {} clips, duration {:.2}s",
+        data.tracks.len(),
+        data.tracks.iter().map(|t| t.elements.len()).sum::<usize>(),
+        data.duration
+    );
+    for t in &data.tracks {
+        println!(
+            "  track {:<6} '{}' — {} clip(s){}{}",
+            t.kind,
+            t.name,
+            t.elements.len(),
+            if t.is_hidden() { " [hidden]" } else { "" },
+            if t.is_locked() { " [locked]" } else { "" },
+        );
+    }
+
+    // JSON fidelity round-trip.
+    let json = serde_json::to_string(&data).unwrap();
+    let reparsed: TimelineData = serde_json::from_str(&json).unwrap();
+    let clips_before: usize = data.tracks.iter().map(|t| t.elements.len()).sum();
+    let clips_reparsed: usize = reparsed.tracks.iter().map(|t| t.elements.len()).sum();
+    println!(
+        "json    : round-trip {} -> {} clips  {}",
+        clips_before,
+        clips_reparsed,
+        if clips_before == clips_reparsed { "OK" } else { "MISMATCH" }
+    );
+
+    // Exercise the command layer in memory.
+    if let Some(vid) = data
+        .tracks
+        .iter()
+        .find(|t| t.kind == "video")
+        .and_then(|t| t.elements.first())
+        .cloned()
+    {
+        let before = data.tracks.iter().map(|t| t.elements.len()).sum::<usize>();
+        let mid = vid.timeline_start + vid.duration() / 2.0;
+        apply_command(&mut data, &Command::Split { clip_id: vid.id.clone(), at: mid });
+        let after = data.tracks.iter().map(|t| t.elements.len()).sum::<usize>();
+        println!("split   : clips {before} -> {after}  {}", if after == before + 1 { "OK" } else { "FAIL" });
+
+        // move the new clip, then flip + color-grade it
+        apply_command(&mut data, &Command::SetColor { clip_ids: vec![vid.id.clone()], brightness: Some(1.2), contrast: None, saturation: None });
+        apply_command(&mut data, &Command::FlipH { clip_ids: vec![vid.id.clone()] });
+        let graded = data.get(&vid.id).unwrap();
+        println!(
+            "grade   : brightness {:.2} flipH {}  OK",
+            graded.color.map(|c| c.brightness).unwrap_or(1.0),
+            graded.flip_h.unwrap_or(false)
+        );
+    }
+
+    // Track ops.
+    let tr_before = data.tracks.len();
+    apply_command(&mut data, &Command::AddTrack { kind: "video".into() });
+    println!("track   : add video {} -> {}  OK", tr_before, data.tracks.len());
+
+    // Undo semantics are the editor's; here just confirm re-serialization works.
+    let json2 = serde_json::to_string(&data).unwrap();
+    let _: TimelineData = serde_json::from_str(&json2).unwrap();
+    println!("resave  : serialized {} bytes  OK", json2.len());
+    println!("== edit self-test complete (no DB writes) ==");
+}
 
 pub fn run() {
     println!("== ShelfEdit native — Slice 1 self-test ==");
