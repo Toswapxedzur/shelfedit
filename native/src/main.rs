@@ -5,9 +5,13 @@
 
 mod app;
 mod audio;
+mod commands;
 mod db;
 mod decode;
+mod editor;
 mod model;
+mod monitor;
+mod ops;
 mod player;
 mod selftest;
 
@@ -22,6 +26,10 @@ fn main() -> eframe::Result<()> {
 
     if std::env::args().any(|a| a == "--selftest") {
         selftest::run();
+        return Ok(());
+    }
+    if std::env::args().any(|a| a == "--edittest") {
+        selftest::run_edit();
         return Ok(());
     }
 

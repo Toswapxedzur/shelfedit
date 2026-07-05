@@ -74,6 +74,13 @@ impl Player {
         t.clamp(0.0, self.duration.max(0.0))
     }
 
+    /// Start playback from a specific source time (used by the timeline monitor
+    /// when it points the decoder at a clip).
+    pub fn play_from(&mut self, from: f64) {
+        self.paused_at = from.clamp(0.0, self.duration.max(0.0));
+        self.play();
+    }
+
     pub fn play(&mut self) {
         if self.playing {
             return;
