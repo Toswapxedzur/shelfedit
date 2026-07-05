@@ -18,6 +18,7 @@ use std::thread;
 use anyhow::{anyhow, Result};
 
 /// One decoded frame: RGBA8 at `width`x`height`, tagged with its source time.
+#[derive(Clone)]
 pub struct Frame {
     pub time: f64,
     pub width: u32,
@@ -296,11 +297,22 @@ impl ScrubStream {
                 // not how far the cursor jumped — so fast scrubbing stops lagging.
                 const SEEK_GAP: f64 = 0.25; // forward gap beyond which we jump, not stream
                 const STREAM_BUDGET: u32 = 16; // max sequential decodes per tick
+                const CACHE_CAP: usize = 120; // decoded frames kept in RAM (~440MB @720p)
                 let eps = 1.0 / 60.0;
+                let qk = |t: f64| (t * 120.0).round() as i64; // ~8ms buckets
                 let mut reader: Option<AvReader> = None; // sequential (slow drag)
                 let mut gen: Option<AvDecoder> = None; // warm random-access (jumps)
                 let mut cur_path = String::new();
                 let mut last_t = f64::NEG_INFINITY; // reader's current position
+
+                // Decoded-frame RAM cache. Both decoders fill it; backward moves
+                // and re-scrubs serve straight from here (instant) instead of
+                // re-decoding — the trick that makes backward scrubbing smooth.
+                let mut cache: std::collections::HashMap<i64, Frame> =
+                    std::collections::HashMap::new();
+                let mut order: std::collections::VecDeque<i64> =
+                    std::collections::VecDeque::new();
+
                 while let Ok(mut msg) = target_rx.recv() {
                     while let Ok(m) = target_rx.try_recv() {
                         msg = m; // coalesce to the newest cursor position
@@ -311,13 +323,53 @@ impl ScrubStream {
                         gen = None;
                         cur_path = path.clone();
                         last_t = f64::NEG_INFINITY;
+                        cache.clear();
+                        order.clear();
                     }
                     if gen.is_none() {
                         gen = AvDecoder::open(&path, max_dim, 0).ok();
                     }
 
+                    // 1) Serve from the RAM cache if we already decoded a frame
+                    // near the cursor (backward moves / re-scrubs land here).
+                    let tq = qk(target);
+                    let mut best: Option<(i64, i64)> = None; // (dist, key)
+                    for &k in cache.keys() {
+                        let d = (k - tq).abs();
+                        if d <= 3 && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+                            best = Some((d, k));
+                        }
+                    }
+                    if let Some((_, k)) = best {
+                        if let Some(f) = cache.get(&k) {
+                            last_t = f.time;
+                            // Serving from cache: the sequential reader is no longer
+                            // positioned at the cursor, so drop it (cheap reopen on
+                            // the next forward miss).
+                            reader = None;
+                            let _ = frame_tx.send((cur_path.clone(), f.clone()));
+                            continue;
+                        }
+                    }
+
                     let gap = target - last_t;
                     let stream_ok = gap >= -eps && gap <= SEEK_GAP;
+
+                    // Small helper to cache a freshly decoded frame (bounded LRU).
+                    let mut cache_put = |cache: &mut std::collections::HashMap<i64, Frame>,
+                                         order: &mut std::collections::VecDeque<i64>,
+                                         f: &Frame| {
+                        let k = qk(f.time);
+                        if !cache.contains_key(&k) {
+                            cache.insert(k, f.clone());
+                            order.push_back(k);
+                            while order.len() > CACHE_CAP {
+                                if let Some(o) = order.pop_front() {
+                                    cache.remove(&o);
+                                }
+                            }
+                        }
+                    };
 
                     if stream_ok && reader.is_some() {
                         // Slow forward: stream sequentially to the cursor.
@@ -329,6 +381,7 @@ impl ScrubStream {
                             match r.next() {
                                 Some(f) => {
                                     last_t = f.time;
+                                    cache_put(&mut cache, &mut order, &f);
                                     emitted = Some(f);
                                 }
                                 None => {
@@ -342,7 +395,7 @@ impl ScrubStream {
                         }
                     } else if stream_ok {
                         // Slow forward but no reader yet (just settled out of a
-                        // fling / first frame): open the reader here so subsequent
+                        // fling / cache region): open the reader here so subsequent
                         // small steps stream. One-time ~open cost at this transition.
                         reader = AvReader::open(&path, (target - 0.001).max(0.0), max_dim).ok();
                         last_t = f64::NEG_INFINITY;
@@ -354,6 +407,7 @@ impl ScrubStream {
                                 match r.next() {
                                     Some(f) => {
                                         last_t = f.time;
+                                        cache_put(&mut cache, &mut order, &f);
                                         emitted = Some(f);
                                     }
                                     None => {
@@ -367,13 +421,14 @@ impl ScrubStream {
                             }
                         }
                     } else {
-                        // Fast fling or backward: jump to the cursor with the warm
-                        // generator and decode just that frame. Drop the sequential
-                        // reader (it's now behind); it reopens when the drag slows.
+                        // Fast fling or backward into a NOT-yet-cached spot: jump to
+                        // the cursor with the warm generator and decode just that
+                        // frame (then cache it so a re-scrub is instant).
                         reader = None;
                         if let Some(g) = gen.as_mut() {
                             if let Ok(f) = g.frame_at(target.max(0.0)) {
                                 last_t = target;
+                                cache_put(&mut cache, &mut order, &f);
                                 let _ = frame_tx.send((cur_path.clone(), f));
                             }
                         }
@@ -382,7 +437,11 @@ impl ScrubStream {
             });
         }
 
-        Self { tx, rx, last: None }
+        Self {
+            tx,
+            rx,
+            last: None,
+        }
     }
 
     /// Request the frame at `target` for `path`; returns the most recent frame
