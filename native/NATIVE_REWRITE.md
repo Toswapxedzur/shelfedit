@@ -211,8 +211,41 @@ Responsiveness + the first authoritative render out of the editor.
 
 The preview is the fast approximation; **export is the authoritative render**.
 
+## Slice 5 — warm hardware decoder (scrub any frame, any time)
+
+Replaced the "spawn one FFmpeg process per frame" scrub path with a persistent,
+hardware-accelerated decoder — the same architecture real editors (CapCut, FCP)
+use to make arbitrary-frame scrubbing feel instant: keyframe index + warm
+decoder + frame cache, all handled by the platform.
+
+- **Decoder interface** (`decode.rs::FrameDecoder`): a small trait behind which
+  each platform slots its backend. macOS uses AVFoundation; other platforms use
+  the FFmpeg CLI fallback (so a Windows backend is a drop-in later).
+- **macOS backend** (`av_decode.m` + `avdecode.rs`): a persistent
+  `AVAssetImageGenerator` per media file, reused across seeks (kept *warm*),
+  frame-accurate (zero tolerance), hardware-decoded, aspect-capped to the
+  preview size. AVFoundation does the keyframe indexing + seek + decode
+  internally.
+- **Single change point**: both scrub paths (the player's seek and the preview's
+  frame cache) run through the one background scrub worker, so upgrading that
+  worker upgraded everything — paused scrub, drag scrub, thumbnails.
+- **Measured**: warm scrub ~40 ms steady-state (was ~154 ms with per-frame
+  FFmpeg), and now *frame-accurate* rather than snapping to a keyframe.
+- **No more flicker / wrong image**: on a cache miss the preview holds *this
+  clip's* last shown frame (never a blank or a stale unrelated time) and the
+  cache also returns the nearest already-decoded frame within ~0.5 s, so the
+  picture tracks the cursor and refines instead of flashing.
+- Streaming *playback* still uses the FFmpeg decode-ahead pipe (it was already
+  real-time); only the single-frame/scrub path changed.
+
+Build adds a macOS-only `cc` build step (`build.rs`) that compiles the
+Objective-C bridge and links Foundation/AVFoundation/CoreMedia/CoreGraphics/
+CoreVideo.
+
 ## Next
 
+- Windows/Linux backend behind `FrameDecoder` (e.g. Media Foundation / VA-API,
+  or pinned-FFmpeg libav bindings) if the app ever leaves macOS.
 - Real-time multi-track audio *mixing* in the preview (playback still monitors
   the top clip's source audio at unity; the export already mixes correctly).
 - Export parity for **rotation** and the **reveal-mask** (both render in the GPU

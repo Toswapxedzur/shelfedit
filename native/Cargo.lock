@@ -3207,6 +3207,7 @@ name = "shelfedit-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "cpal",
  "dirs",
  "eframe",
