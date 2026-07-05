@@ -8,11 +8,14 @@ use egui::{
 };
 
 use crate::commands::Command;
+use crate::compositor::{CompositorGpu, LayerInput, PreviewCallback};
 use crate::db;
+use crate::decode::FrameCache;
 use crate::editor::{Editor, Mode};
-use crate::model::{ChromaKey, MaskRect, TimelineData, Transform};
+use crate::model::{ChromaKey, Element, MaskRect, TimelineData, Transform};
 use crate::monitor::{active_text_clips, active_video_clip, Monitor};
 use crate::ops;
+use std::sync::Arc;
 
 const HEADER_W: f32 = 150.0;
 const RULER_H: f32 = 22.0;
@@ -42,10 +45,25 @@ pub struct EditorApp {
 
     drag: Option<ClipDrag>,
     scrubbing: bool,
+
+    gpu: bool,
+    frame_cache: FrameCache,
 }
 
 impl EditorApp {
-    pub fn new() -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Register the GPU compositor's long-lived resources (pipeline etc.) in
+        // egui's callback resource store, if we're on the wgpu backend.
+        let gpu = if let Some(rs) = cc.wgpu_render_state.as_ref() {
+            let comp = CompositorGpu::new(&rs.device, rs.target_format);
+            rs.renderer.write().callback_resources.insert(comp);
+            true
+        } else {
+            false
+        };
+
+        let frame_cache = FrameCache::new(1280);
+
         match db::load_best() {
             Ok(lp) => {
                 let fps = lp.timeline.canvas_or_default().fps;
@@ -62,6 +80,8 @@ impl EditorApp {
                     tex_version: u64::MAX,
                     drag: None,
                     scrubbing: false,
+                    gpu,
+                    frame_cache,
                 }
             }
             Err(e) => Self {
@@ -72,6 +92,8 @@ impl EditorApp {
                 tex_version: u64::MAX,
                 drag: None,
                 scrubbing: false,
+                gpu,
+                frame_cache,
             },
         }
     }
@@ -124,6 +146,8 @@ impl eframe::App for EditorApp {
         let tex_id = self.video_tex.as_ref().map(|t| t.id());
 
         // Panels (re-borrow through options).
+        let gpu = self.gpu;
+        let frame_cache = &mut self.frame_cache;
         let editor = self.editor.as_mut().unwrap();
         let monitor = self.monitor.as_mut().unwrap();
 
@@ -148,7 +172,7 @@ impl eframe::App for EditorApp {
                 Self::timeline_ui(ui, editor, monitor, &mut self.drag, &mut self.scrubbing);
             });
         egui::CentralPanel::default().show(ctx, |ui| {
-            Self::preview_ui(ui, editor, monitor, tex_id);
+            Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache);
         });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(if playing { 8 } else { 33 }));
@@ -538,7 +562,14 @@ impl EditorApp {
     }
 
     // ---- preview -----------------------------------------------------------
-    fn preview_ui(ui: &mut egui::Ui, editor: &mut Editor, monitor: &mut Monitor, tex: Option<TextureId>) {
+    fn preview_ui(
+        ui: &mut egui::Ui,
+        editor: &mut Editor,
+        monitor: &mut Monitor,
+        tex: Option<TextureId>,
+        gpu: bool,
+        frame_cache: &mut FrameCache,
+    ) {
         // transport
         ui.horizontal(|ui| {
             let label = if monitor.is_playing() { "⏸ Pause" } else { "▶ Play" };
@@ -573,8 +604,49 @@ impl EditorApp {
 
         let t = editor.playhead;
 
-        // Primary video clip → textured, transformed quad.
-        if let (Some(tex), Some(frame)) = (tex, monitor.current_frame()) {
+        // Build the ordered layer list: every visible video clip active at `t`,
+        // bottom track first so the top track composites last (on top).
+        let mut layers: Vec<LayerInput> = Vec::new();
+        let cur_clip_id = monitor.current_clip_id().map(|s| s.to_string());
+        for track in editor.data.tracks.iter().rev() {
+            if track.kind != "video" || track.is_hidden() {
+                continue;
+            }
+            let Some(clip) = track
+                .elements
+                .iter()
+                .find(|e| e.media_id.is_some() && t >= e.timeline_start && t < e.end())
+            else {
+                continue;
+            };
+            let Some(mid) = clip.media_id.as_deref() else { continue };
+            let Some(mi) = editor.media.get(mid) else { continue };
+            let source_t = clip.source_start.unwrap_or(0.0) + (t - clip.timeline_start);
+
+            // Live frame for the clip the monitor is decoding; cache for the rest.
+            let framed: Option<(Arc<Vec<u8>>, u32, u32)> =
+                if cur_clip_id.as_deref() == Some(clip.id.as_str()) {
+                    monitor
+                        .current_frame()
+                        .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                } else {
+                    frame_cache
+                        .get(&mi.path, source_t, mi.width, mi.height)
+                        .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                };
+            if let Some((rgba, fw, fh)) = framed {
+                layers.push(make_layer(clip, canvas_rect, fw, fh, rgba, t));
+            }
+        }
+
+        if gpu && !layers.is_empty() {
+            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+                rect,
+                PreviewCallback { layers },
+            );
+            painter.add(cb);
+        } else if let (Some(tex), Some(frame)) = (tex, monitor.current_frame()) {
+            // glow fallback: top clip only, no shader effects.
             if let Some(clip) = active_video_clip(&editor.data, t).cloned() {
                 let dur = clip.duration();
                 let lt = (t - clip.timeline_start).clamp(0.0, dur);
@@ -1033,6 +1105,103 @@ fn snap_time(data: &TimelineData, playhead: f64, start: f64, moving_id: &str) ->
         }
     }
     best
+}
+
+fn hex_to_rgb(hex: &str) -> [f32; 3] {
+    let h = hex.trim_start_matches('#');
+    let full = if h.len() == 3 {
+        h.chars().flat_map(|c| [c, c]).collect::<String>()
+    } else {
+        h.to_string()
+    };
+    let n = u32::from_str_radix(&full, 16).unwrap_or(0x00ff00);
+    [
+        ((n >> 16) & 255) as f32 / 255.0,
+        ((n >> 8) & 255) as f32 / 255.0,
+        (n & 255) as f32 / 255.0,
+    ]
+}
+
+fn clip_corners(
+    canvas_rect: Rect,
+    fw: f32,
+    fh: f32,
+    scale: f32,
+    x: f32,
+    y: f32,
+    rot_deg: f32,
+) -> [[f32; 2]; 4] {
+    let cw = canvas_rect.width();
+    let ch = canvas_rect.height();
+    let fit = (cw / fw).min(ch / fh);
+    let w = fw * fit * scale;
+    let h = fh * fit * scale;
+    let center = canvas_rect.center() + Vec2::new(x * cw, y * ch);
+    let ang = rot_deg.to_radians();
+    let (sin, cos) = ang.sin_cos();
+    let rot = |dx: f32, dy: f32| [center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos];
+    let hw = w / 2.0;
+    let hh = h / 2.0;
+    [rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh)]
+}
+
+fn uv_for(crop: Option<MaskRect>, flip_h: bool, flip_v: bool) -> [[f32; 2]; 4] {
+    let (u0, v0, u1, v1) = match crop {
+        Some(c) => (c.x as f32, c.y as f32, (c.x + c.w) as f32, (c.y + c.h) as f32),
+        None => (0.0, 0.0, 1.0, 1.0),
+    };
+    let (u0, u1) = if flip_h { (u1, u0) } else { (u0, u1) };
+    let (v0, v1) = if flip_v { (v1, v0) } else { (v0, v1) };
+    [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]
+}
+
+fn make_layer(
+    clip: &Element,
+    canvas_rect: Rect,
+    fw: u32,
+    fh: u32,
+    rgba: Arc<Vec<u8>>,
+    t: f64,
+) -> LayerInput {
+    let dur = clip.duration();
+    let lt = (t - clip.timeline_start).clamp(0.0, dur);
+    let p = ops::resolve_props(clip, lt, dur);
+    let corners = clip_corners(
+        canvas_rect,
+        fw as f32,
+        fh as f32,
+        p.scale as f32,
+        p.x as f32,
+        p.y as f32,
+        p.rotation as f32,
+    );
+    let uv = uv_for(clip.crop, clip.flip_h.unwrap_or(false), clip.flip_v.unwrap_or(false));
+    let col = clip.color.unwrap_or_default();
+    let (chroma_enabled, chroma_rgb, similarity, smoothness) = match &clip.chroma {
+        Some(c) if c.enabled => (true, hex_to_rgb(&c.color), c.similarity as f32, c.smoothness as f32),
+        _ => (false, [0.0; 3], 0.0, 0.0),
+    };
+    let (mask_enabled, mask) = match clip.mask {
+        Some(m) => (true, [m.x as f32, m.y as f32, m.w as f32, m.h as f32]),
+        None => (false, [0.0; 4]),
+    };
+    LayerInput {
+        rgba,
+        w: fw,
+        h: fh,
+        corners,
+        uv,
+        brightness: col.brightness as f32,
+        contrast: col.contrast as f32,
+        saturation: col.saturation as f32,
+        opacity: p.opacity as f32,
+        chroma_enabled,
+        chroma_rgb,
+        similarity,
+        smoothness,
+        mask_enabled,
+        mask,
+    }
 }
 
 // Draw a textured, transformed quad for a video clip into `canvas_rect`.

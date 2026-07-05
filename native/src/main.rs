@@ -6,6 +6,7 @@
 mod app;
 mod audio;
 mod commands;
+mod compositor;
 mod db;
 mod decode;
 mod editor;
@@ -48,14 +49,14 @@ fn main() -> eframe::Result<()> {
     let res = eframe::run_native(
         "ShelfEdit (native)",
         make_options(eframe::Renderer::Wgpu),
-        Box::new(|_cc| Ok(Box::new(EditorApp::new()))),
+        Box::new(|cc| Ok(Box::new(EditorApp::new(cc)))),
     );
     if let Err(e) = &res {
         log::error!("wgpu renderer failed ({e}); retrying with glow");
         return eframe::run_native(
             "ShelfEdit (native)",
             make_options(eframe::Renderer::Glow),
-            Box::new(|_cc| Ok(Box::new(EditorApp::new()))),
+            Box::new(|cc| Ok(Box::new(EditorApp::new(cc)))),
         );
     }
     res

@@ -195,3 +195,66 @@ impl SeekWorker {
         let _ = self.target_tx.send(t);
     }
 }
+
+/// Async decoded-frame cache for compositing non-primary / paused layers.
+/// One coalescing decode worker per media file; results are cached by
+/// (path, ~0.1s-quantized source time) so repeat scrubs/paints are instant.
+pub struct FrameCache {
+    max_dim: u32,
+    workers: std::collections::HashMap<String, SeekWorker>,
+    cache: std::collections::HashMap<(String, i64), Arc<Frame>>,
+    order: std::collections::VecDeque<(String, i64)>,
+    cap: usize,
+}
+
+fn qkey(t: f64) -> i64 {
+    (t * 10.0).round() as i64
+}
+
+impl FrameCache {
+    pub fn new(max_dim: u32) -> Self {
+        Self {
+            max_dim,
+            workers: std::collections::HashMap::new(),
+            cache: std::collections::HashMap::new(),
+            order: std::collections::VecDeque::new(),
+            cap: 128,
+        }
+    }
+
+    /// Return the cached frame at `t` if ready, else enqueue a decode (sized to
+    /// the media's aspect) and return None. Drains completed decodes first.
+    pub fn get(&mut self, path: &str, t: f64, src_w: u32, src_h: u32) -> Option<Arc<Frame>> {
+        if let Some(w) = self.workers.get(path) {
+            while let Ok(fr) = w.frame_rx.try_recv() {
+                let k = (path.to_string(), qkey(fr.time));
+                if !self.cache.contains_key(&k) {
+                    self.order.push_back(k.clone());
+                }
+                self.cache.insert(k, Arc::new(fr));
+            }
+            self.evict();
+        }
+        let key = (path.to_string(), qkey(t));
+        if let Some(f) = self.cache.get(&key) {
+            return Some(f.clone());
+        }
+        let (ow, oh) = preview_size(src_w.max(2), src_h.max(2), self.max_dim);
+        let worker = self
+            .workers
+            .entry(path.to_string())
+            .or_insert_with(|| SeekWorker::new(path.to_string(), ow, oh));
+        worker.request(t);
+        None
+    }
+
+    fn evict(&mut self) {
+        while self.cache.len() > self.cap {
+            if let Some(k) = self.order.pop_front() {
+                self.cache.remove(&k);
+            } else {
+                break;
+            }
+        }
+    }
+}
