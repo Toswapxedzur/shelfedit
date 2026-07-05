@@ -231,24 +231,74 @@ pub fn run() {
     println!("scrub avg  : {:.0} ms  (ffmpeg per-frame fallback)", total / points.len() as f64);
 
     // --- warm hardware decoder (macOS AVFoundation) --------------------------
+    // Compare precise (park) vs tolerant (drag) vs tolerant+low-res. Skip the
+    // first (cold) point of each so we measure the *warm* steady state.
     #[cfg(target_os = "macos")]
     {
-        match crate::avdecode::AvDecoder::open(&p.media_path, 1280) {
-            Ok(mut dec) => {
-                let mut total = 0.0;
-                for &t in &points {
-                    let s = Instant::now();
-                    let ok = dec.frame_at(t).is_ok();
-                    let ms = s.elapsed().as_secs_f64() * 1000.0;
-                    total += ms;
-                    println!("AV scrub @{t:>7.1}s : {ms:>6.0} ms  {}", if ok { "" } else { "FAIL" });
+        let bench = |label: &str, max_dim: u32, tol: u32| {
+            match crate::avdecode::AvDecoder::open(&p.media_path, max_dim, tol) {
+                Ok(mut dec) => {
+                    let _ = dec.frame_at(points[0]); // warm up (not counted)
+                    let mut total = 0.0;
+                    let mut n = 0;
+                    for &t in &points[1..] {
+                        let s = Instant::now();
+                        let _ = dec.frame_at(t);
+                        total += s.elapsed().as_secs_f64() * 1000.0;
+                        n += 1;
+                    }
+                    println!("AV {label:<26}: {:.0} ms/frame (warm)", total / n as f64);
                 }
+                Err(e) => println!("AV {label}: unavailable ({e})"),
+            }
+        };
+        bench("precise 1280 (park)", 1280, 0);
+        bench("tolerant 1280 (drag)", 1280, 60);
+        bench("tolerant 640 (drag)", 640, 60);
+
+        // Realistic drag: many small forward steps (1 frame apart) from a base.
+        // This is what a scrub actually does; reveals whether the generator can
+        // exploit near-sequential access.
+        let sweep = |label: &str, max_dim: u32, tol: u32| {
+            match crate::avdecode::AvDecoder::open(&p.media_path, max_dim, tol) {
+                Ok(mut dec) => {
+                    let base = p.duration * 0.3;
+                    let step = 1.0 / fps as f64;
+                    let _ = dec.frame_at(base);
+                    let s = Instant::now();
+                    let n = 40;
+                    for i in 0..n {
+                        let _ = dec.frame_at(base + i as f64 * step);
+                    }
+                    let per = s.elapsed().as_secs_f64() * 1000.0 / n as f64;
+                    println!("AV {label:<26}: {per:.0} ms/frame ({:.0} fps)", 1000.0 / per);
+                }
+                Err(e) => println!("AV {label}: unavailable ({e})"),
+            }
+        };
+        sweep("sweep precise 1280", 1280, 0);
+        sweep("sweep tolerant 1280", 1280, 60);
+        sweep("sweep tolerant 640", 640, 60);
+
+        // Sequential reader (AVAssetReader) — the playback-like scrub path.
+        match crate::avdecode::AvReader::open(&p.media_path, p.duration * 0.3, 1280) {
+            Ok(mut r) => {
+                let _ = r.next(); // first read includes reader spin-up
+                let s = Instant::now();
+                let mut n = 0;
+                while n < 60 {
+                    if r.next().is_none() {
+                        break;
+                    }
+                    n += 1;
+                }
+                let per = s.elapsed().as_secs_f64() * 1000.0 / n.max(1) as f64;
                 println!(
-                    "AV scrub avg: {:.0} ms  (warm AVFoundation hardware decoder)",
-                    total / points.len() as f64
+                    "AV {:<26}: {per:.1} ms/frame ({:.0} fps)  <- sequential scrub",
+                    "reader 1280 sequential", 1000.0 / per
                 );
             }
-            Err(e) => println!("AV decoder: unavailable ({e})"),
+            Err(e) => println!("AV reader sequential: unavailable ({e})"),
         }
     }
 

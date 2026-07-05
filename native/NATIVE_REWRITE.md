@@ -242,6 +242,35 @@ Build adds a macOS-only `cc` build step (`build.rs`) that compiles the
 Objective-C bridge and links Foundation/AVFoundation/CoreMedia/CoreGraphics/
 CoreVideo.
 
+## Slice 6 — playback-like scrubbing (sequential scrub stream)
+
+Slice 5 made *any* frame reachable, but dragging still felt choppy versus real
+playback. The reason is structural, not a bug: `AVAssetImageGenerator` (and any
+"single frame at time T" API) **re-seeks on every call**, so it tops out around
+~22–24 fps no matter what — even for adjacent frames (measured, tolerance and
+resolution changed nothing). Real editors (CapCut/FCP) make scrubbing feel like
+variable-speed playback because forward dragging is **sequential decode**: the
+decoder streams frame after frame in order, which is the cheapest possible path.
+
+- **Sequential reader** (`av_decode.m` `se_av_reader_*` + `avdecode.rs::AvReader`):
+  an `AVAssetReader` that streams hardware-decoded frames forward from a start
+  time, scaled to preview size, converted BGRA→RGBA. Measured **~5 ms/frame
+  (~190 fps)** vs ~44 ms for the image generator on the same media — the ~8×
+  that closes the gap with playback.
+- **Scrub stream follows the cursor** (`decode.rs::ScrubStream`): a background
+  worker that reads forward to catch the playhead and emits the frame nearest
+  the cursor. Dragging forward = pure sequential play (smooth, dynamic speed);
+  a backward move or a big jump reopens the reader at the new spot (a reader is
+  far cheaper to respawn than an FFmpeg process).
+- **Layered fallbacks** (`app.rs` preview): the top-most active clip while paused
+  uses the scrub stream first, then the frame cache, then the last-good frame —
+  so it's playback-smooth when it can be and never flickers when it can't.
+- **Two tools for two jobs**: the sequential reader for *motion* (dragging),
+  the frame-accurate image generator for *parking* (the player still re-seeks
+  exactly on release), and a wide-tolerance image generator for thumbnails.
+- The preview now repaints fast (~120 fps) while a drag is in progress so the
+  streamed frames actually flow instead of snapping every ~30 ms.
+
 ## Next
 
 - Windows/Linux backend behind `FrameDecoder` (e.g. Media Foundation / VA-API,
