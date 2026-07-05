@@ -189,15 +189,23 @@ impl FrameDecoder for FfmpegDecoder {
     }
 }
 
-/// Pick the best single-frame decoder for this platform/media.
-fn open_decoder(path: &str, max_dim: u32, src_w: u32, src_h: u32) -> Box<dyn FrameDecoder> {
+/// Pick the best single-frame decoder for this platform/media. `tolerance_ms`
+/// trades precision for speed (0 = exact/park, >0 = fast/scrub).
+fn open_decoder(
+    path: &str,
+    max_dim: u32,
+    src_w: u32,
+    src_h: u32,
+    tolerance_ms: u32,
+) -> Box<dyn FrameDecoder> {
     #[cfg(target_os = "macos")]
     {
-        match crate::avdecode::AvDecoder::open(path, max_dim) {
+        match crate::avdecode::AvDecoder::open(path, max_dim, tolerance_ms) {
             Ok(d) => return Box::new(d),
             Err(e) => log::warn!("AVFoundation decoder unavailable for {path}: {e}; using ffmpeg"),
         }
     }
+    let _ = tolerance_ms; // ffmpeg's input `-ss` is already a coarse seek
     let (w, h) = preview_size(src_w.max(2), src_h.max(2), max_dim);
     Box::new(FfmpegDecoder {
         path: path.to_string(),
@@ -215,11 +223,11 @@ pub struct SeekWorker {
 }
 
 impl SeekWorker {
-    pub fn new(path: String, max_dim: u32, src_w: u32, src_h: u32) -> Self {
+    pub fn new(path: String, max_dim: u32, src_w: u32, src_h: u32, tolerance_ms: u32) -> Self {
         let (target_tx, target_rx) = std::sync::mpsc::channel::<f64>();
         let (frame_tx, frame_rx) = sync_channel::<Frame>(2);
         thread::spawn(move || {
-            let mut dec = open_decoder(&path, max_dim, src_w, src_h);
+            let mut dec = open_decoder(&path, max_dim, src_w, src_h, tolerance_ms);
             while let Ok(mut t) = target_rx.recv() {
                 // Coalesce: only decode the most recent requested target.
                 while let Ok(nt) = target_rx.try_recv() {
@@ -244,11 +252,111 @@ impl SeekWorker {
     }
 }
 
+/// Playback-like scrubbing: a sequential reader that follows the cursor.
+///
+/// Unlike the per-frame image generator (which re-seeks every call, ~24fps),
+/// this streams frames forward from a start time at a few ms each — so dragging
+/// forward feels like variable-speed playback. It reopens the reader on a
+/// backward move or a large forward jump. On non-macOS it stays empty and the
+/// caller falls back to the frame cache.
+pub struct ScrubStream {
+    #[allow(dead_code)]
+    tx: std::sync::mpsc::Sender<(String, f64, u32)>,
+    #[allow(dead_code)]
+    rx: Receiver<(String, Frame)>,
+    last: Option<(String, Arc<Vec<u8>>, u32, u32)>,
+}
+
+impl Default for ScrubStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScrubStream {
+    pub fn new() -> Self {
+        let (tx, _target_rx) = std::sync::mpsc::channel::<(String, f64, u32)>();
+        let (_frame_tx, rx) = sync_channel::<(String, Frame)>(2);
+
+        #[cfg(target_os = "macos")]
+        {
+            let target_rx = _target_rx;
+            let frame_tx = _frame_tx;
+            thread::spawn(move || {
+                use crate::avdecode::AvReader;
+                let mut reader: Option<AvReader> = None;
+                let mut cur_path = String::new();
+                let mut anchor = 0.0f64;
+                let mut last_t = -1.0f64;
+                while let Ok(mut msg) = target_rx.recv() {
+                    while let Ok(m) = target_rx.try_recv() {
+                        msg = m;
+                    }
+                    let (path, target, max_dim) = msg;
+                    let eps = 1.0 / 60.0;
+                    // Reopen on a new clip, a backward move, or a big forward jump.
+                    let reopen = reader.is_none()
+                        || path != cur_path
+                        || target < anchor - 0.05
+                        || target > last_t + 2.0;
+                    if reopen {
+                        reader = AvReader::open(&path, (target - 0.001).max(0.0), max_dim).ok();
+                        cur_path = path.clone();
+                        anchor = target;
+                        last_t = target - 1.0; // force one read
+                    }
+                    if let Some(r) = reader.as_mut() {
+                        let mut emitted: Option<Frame> = None;
+                        let mut budget = 300; // bound catch-up work per request
+                        while last_t < target - eps && budget > 0 {
+                            budget -= 1;
+                            match r.next() {
+                                Some(f) => {
+                                    last_t = f.time;
+                                    emitted = Some(f);
+                                }
+                                None => {
+                                    reader = None;
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(f) = emitted {
+                            let _ = frame_tx.send((cur_path.clone(), f));
+                        }
+                    }
+                }
+            });
+        }
+
+        Self { tx, rx, last: None }
+    }
+
+    /// Request the frame at `target` for `path`; returns the most recent frame
+    /// the sequential reader has produced (refines toward the cursor).
+    pub fn frame_for(
+        &mut self,
+        path: &str,
+        target: f64,
+        max_dim: u32,
+    ) -> Option<(Arc<Vec<u8>>, u32, u32)> {
+        let _ = self.tx.send((path.to_string(), target, max_dim));
+        while let Ok((p, f)) = self.rx.try_recv() {
+            self.last = Some((p, Arc::new(f.rgba), f.width, f.height));
+        }
+        match &self.last {
+            Some((p, rgba, w, h)) if p == path => Some((rgba.clone(), *w, *h)),
+            _ => None,
+        }
+    }
+}
+
 /// Async decoded-frame cache for compositing non-primary / paused layers.
 /// One coalescing decode worker per media file; results are cached by
 /// (path, ~0.1s-quantized source time) so repeat scrubs/paints are instant.
 pub struct FrameCache {
     max_dim: u32,
+    tolerance_ms: u32,
     workers: std::collections::HashMap<String, SeekWorker>,
     cache: std::collections::HashMap<(String, i64), Arc<Frame>>,
     order: std::collections::VecDeque<(String, i64)>,
@@ -260,9 +368,11 @@ fn qkey(t: f64) -> i64 {
 }
 
 impl FrameCache {
-    pub fn new(max_dim: u32) -> Self {
+    /// `tolerance_ms` trades precision for speed while dragging (0 = exact).
+    pub fn new(max_dim: u32, tolerance_ms: u32) -> Self {
         Self {
             max_dim,
+            tolerance_ms,
             workers: std::collections::HashMap::new(),
             cache: std::collections::HashMap::new(),
             order: std::collections::VecDeque::new(),
@@ -288,10 +398,10 @@ impl FrameCache {
             return Some(f.clone());
         }
         let max_dim = self.max_dim;
-        let worker = self
-            .workers
-            .entry(path.to_string())
-            .or_insert_with(|| SeekWorker::new(path.to_string(), max_dim, src_w.max(2), src_h.max(2)));
+        let tol = self.tolerance_ms;
+        let worker = self.workers.entry(path.to_string()).or_insert_with(|| {
+            SeekWorker::new(path.to_string(), max_dim, src_w.max(2), src_h.max(2), tol)
+        });
         worker.request(t);
 
         // Not decoded yet: land on the nearest already-decoded frame for this

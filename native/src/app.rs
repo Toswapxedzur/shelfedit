@@ -10,7 +10,7 @@ use egui::{
 use crate::commands::Command;
 use crate::compositor::{CompositorGpu, LayerInput, PreviewCallback};
 use crate::db;
-use crate::decode::FrameCache;
+use crate::decode::{FrameCache, ScrubStream};
 use crate::editor::{Editor, Mode};
 use crate::model::{ChromaKey, Element, MaskRect, TimelineData, Transform};
 use crate::monitor::{active_text_clips, active_video_clip, Monitor};
@@ -49,6 +49,7 @@ pub struct EditorApp {
     gpu: bool,
     frame_cache: FrameCache,
     thumb_cache: FrameCache,
+    scrub: ScrubStream,
     thumbs: std::collections::HashMap<String, egui::TextureHandle>,
 
     export: Option<crate::render::ExportHandle>,
@@ -71,8 +72,11 @@ impl EditorApp {
             false
         };
 
-        let frame_cache = FrameCache::new(1280);
-        let thumb_cache = FrameCache::new(256);
+        // Scrub cache: a small seek tolerance keeps dragging smooth (nearby frame
+        // returned fast); the player re-seeks frame-accurately on release.
+        // Thumbnails don't need precision, so they tolerate a wide window.
+        let frame_cache = FrameCache::new(1280, 60);
+        let thumb_cache = FrameCache::new(256, 500);
 
         match db::load_best() {
             Ok(lp) => {
@@ -93,6 +97,7 @@ impl EditorApp {
                     gpu,
                     frame_cache,
                     thumb_cache,
+                    scrub: ScrubStream::new(),
                     thumbs: std::collections::HashMap::new(),
                     export: None,
                     export_msg: None,
@@ -110,6 +115,7 @@ impl EditorApp {
                 gpu,
                 frame_cache,
                 thumb_cache,
+                scrub: ScrubStream::new(),
                 thumbs: std::collections::HashMap::new(),
                 export: None,
                 export_msg: None,
@@ -169,6 +175,7 @@ impl eframe::App for EditorApp {
         let gpu = self.gpu;
         let frame_cache = &mut self.frame_cache;
         let thumb_cache = &mut self.thumb_cache;
+        let scrub = &mut self.scrub;
         let thumbs = &mut self.thumbs;
         let editor = self.editor.as_mut().unwrap();
         let monitor = self.monitor.as_mut().unwrap();
@@ -205,10 +212,13 @@ impl eframe::App for EditorApp {
             });
         let last_frame = &mut self.last_frame;
         egui::CentralPanel::default().show(ctx, |ui| {
-            Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache, last_frame);
+            Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache, scrub, last_frame);
         });
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(if playing { 8 } else { 33 }));
+        // While dragging the playhead, repaint fast so the sequential scrub
+        // stream visibly flows like playback instead of snapping every ~30ms.
+        let interval = if playing || self.scrubbing { 8 } else { 33 };
+        ctx.request_repaint_after(std::time::Duration::from_millis(interval));
     }
 }
 
@@ -672,6 +682,7 @@ impl EditorApp {
         tex: Option<TextureId>,
         gpu: bool,
         frame_cache: &mut FrameCache,
+        scrub: &mut ScrubStream,
         last_frame: &mut std::collections::HashMap<String, (Arc<Vec<u8>>, u32, u32)>,
     ) {
         // transport
@@ -720,6 +731,14 @@ impl EditorApp {
         // bottom track first so the top track composites last (on top).
         let mut layers: Vec<LayerInput> = Vec::new();
         let cur_clip_id = monitor.current_clip_id().map(|s| s.to_string());
+        // The top-most active video clip is the one the user watches while
+        // scrubbing; drive it from the sequential scrub stream (playback-like)
+        // when paused, so dragging feels like variable-speed play.
+        let scrub_clip_id = if !monitor.is_playing() {
+            crate::monitor::active_video_clip(&editor.data, t).map(|e| e.id.clone())
+        } else {
+            None
+        };
         for track in editor.data.tracks.iter().rev() {
             if track.kind != "video" || track.is_hidden() {
                 continue;
@@ -741,15 +760,26 @@ impl EditorApp {
             // a blank or a stale *other* time), refreshing when the exact frame
             // lands — so scrubbing tracks the cursor without flicker.
             let is_monitor_clip = cur_clip_id.as_deref() == Some(clip.id.as_str());
+            let is_scrub_clip = scrub_clip_id.as_deref() == Some(clip.id.as_str());
             let framed: Option<(Arc<Vec<u8>>, u32, u32)> =
                 if monitor.is_playing() && is_monitor_clip {
                     monitor
                         .current_frame()
                         .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
                 } else {
-                    frame_cache
-                        .get(&mi.path, source_t, mi.width, mi.height)
-                        .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                    // Primary clip while paused: sequential scrub stream first
+                    // (playback-like), then the frame cache, then hold last frame.
+                    let scrubbed = if is_scrub_clip {
+                        scrub.frame_for(&mi.path, source_t, 1280)
+                    } else {
+                        None
+                    };
+                    scrubbed
+                        .or_else(|| {
+                            frame_cache
+                                .get(&mi.path, source_t, mi.width, mi.height)
+                                .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                        })
                         .or_else(|| last_frame.get(&clip.id).cloned())
                         .or_else(|| {
                             if is_monitor_clip {
