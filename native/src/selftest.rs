@@ -89,6 +89,67 @@ pub fn run_edit() {
     println!("== edit self-test complete (no DB writes) ==");
 }
 
+/// Renders the first few seconds of the real project to a temp file to prove
+/// the export filtergraph is valid end-to-end. `cargo run -- --exporttest`.
+pub fn run_export() {
+    use crate::render::{start_export, ExportState};
+    println!("== ShelfEdit native — export self-test ==");
+    let lp = match db::load_best() {
+        Ok(lp) => lp,
+        Err(e) => {
+            println!("FAIL: {e}");
+            std::process::exit(1);
+        }
+    };
+    let mut data = lp.timeline.clone();
+    data.recompute_duration();
+    let out = std::env::temp_dir().join("shelfedit_export_test.mp4");
+    let _ = std::fs::remove_file(&out);
+    println!(
+        "project : {}  dur {:.1}s -> rendering first 4.0s to {}",
+        lp.name,
+        data.duration,
+        out.display()
+    );
+    let h = start_export(data, lp.media.clone(), out.clone(), Some(4.0));
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let s = h.state.lock().unwrap().clone();
+        match s {
+            ExportState::Running(f) => print!("\r  progress {:.0}%   ", f * 100.0),
+            ExportState::Done(p) => {
+                println!("\rDONE: {}", p.display());
+                break;
+            }
+            ExportState::Failed(e) => {
+                println!("\rFAIL: {e}");
+                std::process::exit(1);
+            }
+        }
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+    }
+    // Probe the result.
+    let probe = std::process::Command::new("ffprobe")
+        .args([
+            "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height",
+            "-of", "default=noprint_wrappers=1", out.to_str().unwrap(),
+        ])
+        .output();
+    match probe {
+        Ok(o) => {
+            let meta = String::from_utf8_lossy(&o.stdout);
+            let bytes = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+            println!("output  : {bytes} bytes");
+            for l in meta.lines() {
+                println!("  {l}");
+            }
+            println!("== export self-test complete ==");
+        }
+        Err(e) => println!("probe failed: {e}"),
+    }
+}
+
 pub fn run() {
     println!("== ShelfEdit native — Slice 1 self-test ==");
     let p = match db::find_openable() {

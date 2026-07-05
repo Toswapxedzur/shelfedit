@@ -14,6 +14,7 @@ mod model;
 mod monitor;
 mod ops;
 mod player;
+mod render;
 mod selftest;
 
 use app::EditorApp;
@@ -31,6 +32,10 @@ fn main() -> eframe::Result<()> {
     }
     if std::env::args().any(|a| a == "--edittest") {
         selftest::run_edit();
+        return Ok(());
+    }
+    if std::env::args().any(|a| a == "--exporttest") {
+        selftest::run_export();
         return Ok(());
     }
 
