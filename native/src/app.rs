@@ -219,6 +219,36 @@ impl eframe::App for EditorApp {
         // stream visibly flows like playback instead of snapping every ~30ms.
         let interval = if playing || self.scrubbing { 8 } else { 33 };
         ctx.request_repaint_after(std::time::Duration::from_millis(interval));
+
+        #[cfg(debug_assertions)]
+        {
+            use std::cell::Cell;
+            use std::time::Instant;
+            thread_local! {
+                static R: Cell<(Option<Instant>, u32, u32)> = const { Cell::new((None, 0, 0)) };
+            }
+            R.with(|r| {
+                let (win, mut frames, mut scrub_frames) = r.get();
+                frames += 1;
+                if self.scrubbing { scrub_frames += 1; }
+                let now = Instant::now();
+                let due = win.map(|w| now.duration_since(w).as_secs_f64() >= 0.5).unwrap_or(true);
+                if due {
+                    if let Some(w) = win {
+                        let e = now.duration_since(w).as_secs_f64();
+                        if scrub_frames > 0 {
+                            eprintln!(
+                                "REPAINT {:.0}ms | frames {} ({:.0} fps) | scrubbing {}",
+                                e * 1000.0, frames, frames as f64 / e, scrub_frames,
+                            );
+                        }
+                    }
+                    r.set((Some(now), 0, 0));
+                } else {
+                    r.set((win, frames, scrub_frames));
+                }
+            });
+        }
     }
 }
 
@@ -774,6 +804,36 @@ impl EditorApp {
                     } else {
                         None
                     };
+                    #[cfg(debug_assertions)]
+                    if is_scrub_clip {
+                        use std::cell::Cell;
+                        use std::time::Instant;
+                        thread_local! {
+                            static D: Cell<(Option<Instant>, u32, u32, f64, f64)> =
+                                const { Cell::new((None, 0, 0, f64::INFINITY, f64::NEG_INFINITY)) };
+                        }
+                        D.with(|d| {
+                            let (win, mut n, mut hit, mut lo, mut hi) = d.get();
+                            n += 1;
+                            if scrubbed.is_some() { hit += 1; }
+                            lo = lo.min(source_t);
+                            hi = hi.max(source_t);
+                            let now = Instant::now();
+                            let due = win.map(|w| now.duration_since(w).as_secs_f64() >= 0.5).unwrap_or(true);
+                            if due {
+                                if let Some(w) = win {
+                                    let e = now.duration_since(w).as_secs_f64();
+                                    eprintln!(
+                                        "PREVIEW-SRC {:.0}ms | builds {} ({:.0}/s) | scrub-hit {} | fallback {} | source_t {:.2}..{:.2} (moved {:.2}s)",
+                                        e * 1000.0, n, n as f64 / e, hit, n - hit, lo, hi, hi - lo,
+                                    );
+                                }
+                                d.set((Some(now), 0, 0, f64::INFINITY, f64::NEG_INFINITY));
+                            } else {
+                                d.set((win, n, hit, lo, hi));
+                            }
+                        });
+                    }
                     scrubbed
                         .or_else(|| {
                             frame_cache
@@ -948,8 +1008,10 @@ impl EditorApp {
                 }
             });
 
-            // Right: scrollable lanes + ruler, painted.
-            egui::ScrollArea::horizontal().show(ui, |ui| {
+            // Right: scrollable lanes + ruler, painted. Disable drag-to-scroll so
+            // dragging the playhead/clips reaches our handler instead of being
+            // eaten as scroll-panning (scroll via wheel / scrollbar instead).
+            egui::ScrollArea::horizontal().drag_to_scroll(false).show(ui, |ui| {
                 let content_w = (dur as f32 * pps + 40.0).max(ui.available_width());
                 let (rect, resp) =
                     ui.allocate_exact_size(Vec2::new(content_w, body_h), Sense::click_and_drag());
