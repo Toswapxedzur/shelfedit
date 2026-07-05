@@ -271,6 +271,24 @@ decoder streams frame after frame in order, which is the cheapest possible path.
 - The preview now repaints fast (~120 fps) while a drag is in progress so the
   streamed frames actually flow instead of snapping every ~30 ms.
 
+### Slice 6.1 — velocity-adaptive (fast fling no longer lags)
+
+The first cut streamed *every* intermediate frame to reach the cursor, so a fast
+drag decoded 30–60 frames per tick (~300 ms) just to show one — fast scrubbing
+lagged, and a backward move could stick (the reopen test compared against the
+run's start instead of the reader's current position). Fixed to match editors:
+the decode work now tracks how many frames are *seen*, not how far the cursor
+jumped, using two decoders side by side in the scrub worker.
+
+- **Slow drag → sequential reader** (~5 ms/frame): stream every frame, smooth.
+- **Fast fling / backward → warm image generator** (~40 ms, stays warm so no
+  ~100 ms reader-recreate): jump straight to the cursor, decode only that frame,
+  skip everything in between. The sequential reader is dropped and lazily
+  reopened once when the drag settles back to slow.
+- Threshold: a forward gap under ~0.25 s streams; anything larger, or any
+  backward move, jumps. Per-tick decode is now bounded (a handful of sequential
+  frames, or one seek) regardless of drag speed.
+
 ## Next
 
 - Windows/Linux backend behind `FrameDecoder` (e.g. Media Foundation / VA-API,
