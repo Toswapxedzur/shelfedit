@@ -300,6 +300,27 @@ pub fn run() {
             }
             Err(e) => println!("AV reader sequential: unavailable ({e})"),
         }
+
+        // Fast-fling per-tick cost: the adaptive scrub seeks near the cursor and
+        // decodes ONE frame instead of streaming everything in between. Measure a
+        // seek+one-frame at several spots and compare to the old "stream 60".
+        {
+            let spots = [0.15, 0.4, 0.6, 0.85];
+            let mut total = 0.0;
+            for &f in &spots {
+                let s = Instant::now();
+                if let Ok(mut r) = crate::avdecode::AvReader::open(&p.media_path, p.duration * f, 1280)
+                {
+                    let _ = r.next();
+                }
+                total += s.elapsed().as_secs_f64() * 1000.0;
+            }
+            let per = total / spots.len() as f64;
+            println!(
+                "AV {:<26}: {per:.0} ms/tick  <- fast fling (seek+1 frame, vs ~300 ms streaming 60)",
+                "adaptive seek"
+            );
+        }
     }
 
     println!("== self-test complete ==");
