@@ -5,13 +5,13 @@
 
 class VideoWidget;
 class MltController;
-class QPushButton;
-class QSlider;
-class QLabel;
+class Bridge;
+class QWebEngineView;
+class QWebChannel;
 
-// Slice 1 shell: a native Qt window with the preview surface on top and a
-// transport row (play/pause, scrub slider, time readout) below. Slice 2
-// replaces the transport/timeline area with a QWebEngineView hosting the UI.
+// Slice 2 shell: the native preview surface (fed by MLT) on top, and the HTML
+// UI (transport now, full timeline later) hosted in a QWebEngineView below,
+// talking to C++/MLT over a QWebChannel bridge.
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -20,19 +20,10 @@ public:
 
     bool load(const QString &path);
 
-private slots:
-    void onOpened(double durationSeconds, double fps);
-    void onPositionChanged(int frame, double seconds);
-    void onPlayingChanged(bool playing);
-    void onSliderMoved(int value);
-
 private:
     VideoWidget *m_video = nullptr;
     MltController *m_controller = nullptr;
-    QPushButton *m_playButton = nullptr;
-    QSlider *m_slider = nullptr;
-    QLabel *m_timeLabel = nullptr;
-
-    double m_duration = 0.0;
-    bool m_userScrubbing = false;
+    Bridge *m_bridge = nullptr;
+    QWebEngineView *m_webView = nullptr;
+    QWebChannel *m_channel = nullptr;
 };

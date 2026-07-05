@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShelfEdit controls</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="qwebchannel.js"></script>
+    <script src="app.js" defer></script>
+</head>
+<body>
+    <div class="transport">
+        <button id="play" class="play" disabled>Play</button>
+        <input id="scrub" class="scrub" type="range" min="0" max="1000" value="0" disabled />
+        <span id="time" class="time">00:00.00 / 00:00.00</span>
+    </div>
+    <div id="status" class="status">connecting…</div>
+</body>
+</html>

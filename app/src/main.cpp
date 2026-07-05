@@ -100,6 +100,8 @@ int runSelfTest(const QString &path)
 
 int main(int argc, char **argv)
 {
+    // Required by QtWebEngine (must be set before the QApplication is created).
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     QApplication app(argc, argv);
 
     Mlt::Factory::init();
