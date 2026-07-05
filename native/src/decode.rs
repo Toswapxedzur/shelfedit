@@ -252,12 +252,13 @@ impl SeekWorker {
     }
 }
 
-/// Playback-like scrubbing: a sequential reader that follows the cursor.
+/// Playback-like scrubbing: follows the cursor with the right decoder for the
+/// current scrub speed.
 ///
-/// Unlike the per-frame image generator (which re-seeks every call, ~24fps),
-/// this streams frames forward from a start time at a few ms each — so dragging
-/// forward feels like variable-speed playback. It reopens the reader on a
-/// backward move or a large forward jump. On non-macOS it stays empty and the
+/// Slow drag streams frames sequentially (a few ms each — like variable-speed
+/// playback); a fast fling or a backward move jumps straight to the cursor with
+/// a warm random-access decoder and decodes only that frame, so the work stays
+/// bounded no matter how fast you drag. On non-macOS it stays empty and the
 /// caller falls back to the frame cache.
 pub struct ScrubStream {
     #[allow(dead_code)]
@@ -283,31 +284,46 @@ impl ScrubStream {
             let target_rx = _target_rx;
             let frame_tx = _frame_tx;
             thread::spawn(move || {
-                use crate::avdecode::AvReader;
-                let mut reader: Option<AvReader> = None;
+                use crate::avdecode::{AvDecoder, AvReader};
+                // Two decoders, each used where it's fastest — the split real
+                // editors use:
+                //   * slow drag  -> sequential reader (~5 ms/frame): stream every
+                //     frame, playback-smooth.
+                //   * fast fling / backward -> warm image generator (~40 ms, stays
+                //     warm so no recreate cost): jump straight to the cursor and
+                //     decode ONLY that frame, skipping the frames flown past.
+                // The decode work then tracks how many frames the user can see,
+                // not how far the cursor jumped — so fast scrubbing stops lagging.
+                const SEEK_GAP: f64 = 0.25; // forward gap beyond which we jump, not stream
+                const STREAM_BUDGET: u32 = 16; // max sequential decodes per tick
+                let eps = 1.0 / 60.0;
+                let mut reader: Option<AvReader> = None; // sequential (slow drag)
+                let mut gen: Option<AvDecoder> = None; // warm random-access (jumps)
                 let mut cur_path = String::new();
-                let mut anchor = 0.0f64;
-                let mut last_t = -1.0f64;
+                let mut last_t = f64::NEG_INFINITY; // reader's current position
                 while let Ok(mut msg) = target_rx.recv() {
                     while let Ok(m) = target_rx.try_recv() {
-                        msg = m;
+                        msg = m; // coalesce to the newest cursor position
                     }
                     let (path, target, max_dim) = msg;
-                    let eps = 1.0 / 60.0;
-                    // Reopen on a new clip, a backward move, or a big forward jump.
-                    let reopen = reader.is_none()
-                        || path != cur_path
-                        || target < anchor - 0.05
-                        || target > last_t + 2.0;
-                    if reopen {
-                        reader = AvReader::open(&path, (target - 0.001).max(0.0), max_dim).ok();
+                    if path != cur_path {
+                        reader = None;
+                        gen = None;
                         cur_path = path.clone();
-                        anchor = target;
-                        last_t = target - 1.0; // force one read
+                        last_t = f64::NEG_INFINITY;
                     }
-                    if let Some(r) = reader.as_mut() {
+                    if gen.is_none() {
+                        gen = AvDecoder::open(&path, max_dim, 0).ok();
+                    }
+
+                    let gap = target - last_t;
+                    let stream_ok = gap >= -eps && gap <= SEEK_GAP;
+
+                    if stream_ok && reader.is_some() {
+                        // Slow forward: stream sequentially to the cursor.
+                        let r = reader.as_mut().unwrap();
                         let mut emitted: Option<Frame> = None;
-                        let mut budget = 300; // bound catch-up work per request
+                        let mut budget = STREAM_BUDGET;
                         while last_t < target - eps && budget > 0 {
                             budget -= 1;
                             match r.next() {
@@ -323,6 +339,43 @@ impl ScrubStream {
                         }
                         if let Some(f) = emitted {
                             let _ = frame_tx.send((cur_path.clone(), f));
+                        }
+                    } else if stream_ok {
+                        // Slow forward but no reader yet (just settled out of a
+                        // fling / first frame): open the reader here so subsequent
+                        // small steps stream. One-time ~open cost at this transition.
+                        reader = AvReader::open(&path, (target - 0.001).max(0.0), max_dim).ok();
+                        last_t = f64::NEG_INFINITY;
+                        if let Some(r) = reader.as_mut() {
+                            let mut emitted: Option<Frame> = None;
+                            let mut budget = STREAM_BUDGET;
+                            while last_t < target - eps && budget > 0 {
+                                budget -= 1;
+                                match r.next() {
+                                    Some(f) => {
+                                        last_t = f.time;
+                                        emitted = Some(f);
+                                    }
+                                    None => {
+                                        reader = None;
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(f) = emitted {
+                                let _ = frame_tx.send((cur_path.clone(), f));
+                            }
+                        }
+                    } else {
+                        // Fast fling or backward: jump to the cursor with the warm
+                        // generator and decode just that frame. Drop the sequential
+                        // reader (it's now behind); it reopens when the drag slows.
+                        reader = None;
+                        if let Some(g) = gen.as_mut() {
+                            if let Ok(f) = g.frame_at(target.max(0.0)) {
+                                last_t = target;
+                                let _ = frame_tx.send((cur_path.clone(), f));
+                            }
                         }
                     }
                 }
