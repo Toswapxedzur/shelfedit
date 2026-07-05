@@ -122,14 +122,17 @@ impl Drop for VideoStream {
 }
 
 /// Decode a single frame at `t` (fast input seek). Used for paused scrubbing.
+///
+/// Deliberately *software* decode: the VideoToolbox hwaccel adds a ~300-600ms
+/// session init on every process spawn, which dominates single-frame latency.
+/// Software decode of one frame after an input `-ss` seek is ~3-4x faster here,
+/// so scrubbing feels responsive. (Streaming playback still uses hwaccel.)
 pub fn decode_one(path: &str, t: f64, out_w: u32, out_h: u32) -> Result<Frame> {
     let out = Command::new("ffmpeg")
         .args([
             "-hide_banner",
             "-loglevel",
             "error",
-            "-hwaccel",
-            "videotoolbox",
             "-ss",
             &format!("{t}"),
             "-i",

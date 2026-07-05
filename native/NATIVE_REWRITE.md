@@ -184,10 +184,39 @@ what they say.
 - glow fallback path keeps a basic textured preview (no shader effects) if wgpu
   is unavailable.
 
+## Slice 4 — scrub fix, thumbnails, export (DONE)
+
+Responsiveness + the first authoritative render out of the editor.
+
+- **Scrub latency 493 ms → 145 ms avg** (worst 848 → 183 ms), verified by the
+  self-test. Root cause: `-hwaccel videotoolbox` pays a ~300–600 ms VideoToolbox
+  *session init* on every single-frame process spawn. Single-frame scrub now
+  decodes in **software** (`decode.rs::decode_one`); streaming playback keeps
+  hwaccel. On top of that the scrub flow changed structurally: dragging the
+  ruler / transport only moves the playhead and the preview is served from the
+  (now fast, cached) `FrameCache`; the streaming player is only re-pointed once,
+  on release — so we no longer spawn a decode process per drag tick, and
+  revisiting a time is instant from cache.
+- **Timeline thumbnails**: each video clip shows a poster frame, decoded on a
+  dedicated small `FrameCache` (256 px) so thumbnails never contend with scrub
+  frames; uploaded once to an egui texture and cached.
+- **Export** (`render.rs`): the timeline is rendered to H.264/AAC by building an
+  FFmpeg `filter_complex` — per-clip trim + placement (`setpts`/`overlay` with
+  `enable`), transform (scale/position), crop, flip, colour grade (`eq`),
+  green-screen (`chromakey`), opacity + fades (alpha), text overlays
+  (`drawtext`), and an audio mix that honours per-clip volume + fades across
+  tracks (`atrim`/`adelay`/`afade`/`amix`). Runs on a background thread with
+  live progress parsed from FFmpeg; button + progress live in the top bar.
+  Verified end-to-end (`--exporttest`) producing a valid composited file.
+
+The preview is the fast approximation; **export is the authoritative render**.
+
 ## Next
 
-- Audio mixing that honours per-clip volume + fades and multiple audio tracks
-  (currently plays the top clip's source audio at unity).
-- Import / Export (FFmpeg encode from the timeline) and the AI command bridge
-  (the Rust `Command` enum is already the catalogue).
-- Thumbnail strip on timeline clips (reuse `FrameCache`).
+- Real-time multi-track audio *mixing* in the preview (playback still monitors
+  the top clip's source audio at unity; the export already mixes correctly).
+- Export parity for **rotation** and the **reveal-mask** (both render in the GPU
+  preview; skipped in the export filtergraph for now). Colour-grade uses FFmpeg
+  `eq`, a close but not pixel-identical match to the shader.
+- The AI command bridge (the Rust `Command` enum is already the catalogue; needs
+  wiring to a model/endpoint).

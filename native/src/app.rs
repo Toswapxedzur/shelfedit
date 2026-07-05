@@ -48,6 +48,11 @@ pub struct EditorApp {
 
     gpu: bool,
     frame_cache: FrameCache,
+    thumb_cache: FrameCache,
+    thumbs: std::collections::HashMap<String, egui::TextureHandle>,
+
+    export: Option<crate::render::ExportHandle>,
+    export_msg: Option<String>,
 }
 
 impl EditorApp {
@@ -63,6 +68,7 @@ impl EditorApp {
         };
 
         let frame_cache = FrameCache::new(1280);
+        let thumb_cache = FrameCache::new(256);
 
         match db::load_best() {
             Ok(lp) => {
@@ -82,6 +88,10 @@ impl EditorApp {
                     scrubbing: false,
                     gpu,
                     frame_cache,
+                    thumb_cache,
+                    thumbs: std::collections::HashMap::new(),
+                    export: None,
+                    export_msg: None,
                 }
             }
             Err(e) => Self {
@@ -94,6 +104,10 @@ impl EditorApp {
                 scrubbing: false,
                 gpu,
                 frame_cache,
+                thumb_cache,
+                thumbs: std::collections::HashMap::new(),
+                export: None,
+                export_msg: None,
             },
         }
     }
@@ -148,11 +162,15 @@ impl eframe::App for EditorApp {
         // Panels (re-borrow through options).
         let gpu = self.gpu;
         let frame_cache = &mut self.frame_cache;
+        let thumb_cache = &mut self.thumb_cache;
+        let thumbs = &mut self.thumbs;
         let editor = self.editor.as_mut().unwrap();
         let monitor = self.monitor.as_mut().unwrap();
 
+        let export = &mut self.export;
+        let export_msg = &mut self.export_msg;
         egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
-            Self::topbar_ui(ui, editor, monitor);
+            Self::topbar_ui(ui, editor, monitor, export, export_msg);
         });
         egui::TopBottomPanel::top("tools").show(ctx, |ui| {
             Self::tools_ui(ui, editor);
@@ -169,7 +187,15 @@ impl eframe::App for EditorApp {
             .default_height(320.0)
             .height_range(180.0..=680.0)
             .show(ctx, |ui| {
-                Self::timeline_ui(ui, editor, monitor, &mut self.drag, &mut self.scrubbing);
+                Self::timeline_ui(
+                    ui,
+                    editor,
+                    monitor,
+                    &mut self.drag,
+                    &mut self.scrubbing,
+                    thumb_cache,
+                    thumbs,
+                );
             });
         egui::CentralPanel::default().show(ctx, |ui| {
             Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache);
@@ -238,7 +264,13 @@ impl EditorApp {
     }
 
     // ---- top bar -----------------------------------------------------------
-    fn topbar_ui(ui: &mut egui::Ui, editor: &mut Editor, _monitor: &mut Monitor) {
+    fn topbar_ui(
+        ui: &mut egui::Ui,
+        editor: &mut Editor,
+        _monitor: &mut Monitor,
+        export: &mut Option<crate::render::ExportHandle>,
+        export_msg: &mut Option<String>,
+    ) {
         ui.horizontal(|ui| {
             ui.heading("ShelfEdit");
             ui.label(egui::RichText::new("native").weak());
@@ -255,6 +287,8 @@ impl EditorApp {
                 .weak(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                Self::export_controls(ui, editor, export, export_msg);
+                ui.separator();
                 if ui.button("Save").clicked() {
                     editor.save_now();
                 }
@@ -266,6 +300,67 @@ impl EditorApp {
                     .then(|| editor.undo());
             });
         });
+    }
+
+    /// Export button + live progress. Renders the timeline to an .mp4 next to
+    /// the user's Desktop (falling back to home) via the background renderer.
+    fn export_controls(
+        ui: &mut egui::Ui,
+        editor: &Editor,
+        export: &mut Option<crate::render::ExportHandle>,
+        export_msg: &mut Option<String>,
+    ) {
+        use crate::render::{start_export, ExportState};
+
+        // Poll a running export.
+        let mut finished = false;
+        if let Some(h) = export.as_ref() {
+            match h.state.lock().unwrap().clone() {
+                ExportState::Running(f) => {
+                    *export_msg = Some(format!("Exporting… {:.0}%", f * 100.0));
+                }
+                ExportState::Done(p) => {
+                    *export_msg = Some(format!("Exported → {}", p.display()));
+                    finished = true;
+                }
+                ExportState::Failed(e) => {
+                    *export_msg = Some(format!("Export failed: {e}"));
+                    finished = true;
+                }
+            }
+        }
+        if finished {
+            *export = None;
+        }
+
+        let busy = export.is_some();
+        if ui
+            .add_enabled(!busy, egui::Button::new("⬇ Export"))
+            .clicked()
+        {
+            let dir = dirs_desktop().unwrap_or_else(|| std::env::temp_dir());
+            let safe: String = editor
+                .project_name
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                .collect();
+            let out = dir.join(format!("{safe}_export.mp4"));
+            *export_msg = Some("Exporting… 0%".into());
+            *export = Some(start_export(
+                editor.data.clone(),
+                editor.media.clone(),
+                out,
+                None,
+            ));
+            ui.ctx().request_repaint();
+        }
+        if let Some(m) = export_msg.as_ref() {
+            ui.label(egui::RichText::new(m).weak());
+        }
+        if busy {
+            ui.spinner();
+            ui.ctx().request_repaint();
+        }
     }
 
     // ---- mode / tool strip -------------------------------------------------
@@ -582,9 +677,17 @@ impl EditorApp {
             }
             let dur = editor.duration().max(0.001);
             let mut t = editor.playhead;
-            if ui.add(egui::Slider::new(&mut t, 0.0..=dur).text("s")).changed() {
+            // Scrub live from the frame cache; only re-point the streaming player
+            // when the drag ends (avoids a fresh decode process per tick).
+            let r = ui.add(egui::Slider::new(&mut t, 0.0..=dur).text("s"));
+            if r.changed() {
                 editor.playhead = t;
-                monitor.seek(&editor.data, t);
+                if !r.dragged() {
+                    monitor.seek(&editor.data, t);
+                }
+            }
+            if r.drag_stopped() {
+                monitor.seek(&editor.data, editor.playhead);
             }
             ui.label(format!("{:.2} / {:.2}s", editor.playhead, editor.duration()));
         });
@@ -623,16 +726,23 @@ impl EditorApp {
             let Some(mi) = editor.media.get(mid) else { continue };
             let source_t = clip.source_start.unwrap_or(0.0) + (t - clip.timeline_start);
 
-            // Live frame for the clip the monitor is decoding; cache for the rest.
+            // While playing, the monitor's live stream drives the clip it owns;
+            // when paused/scrubbing everything comes from the fast, cached frame
+            // cache (falling back to the last live frame on a cache miss).
+            let is_monitor_clip = cur_clip_id.as_deref() == Some(clip.id.as_str());
             let framed: Option<(Arc<Vec<u8>>, u32, u32)> =
-                if cur_clip_id.as_deref() == Some(clip.id.as_str()) {
+                if monitor.is_playing() && is_monitor_clip {
                     monitor
                         .current_frame()
                         .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
                 } else {
-                    frame_cache
-                        .get(&mi.path, source_t, mi.width, mi.height)
-                        .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                    match frame_cache.get(&mi.path, source_t, mi.width, mi.height) {
+                        Some(f) => Some((Arc::new(f.rgba.clone()), f.width, f.height)),
+                        None if is_monitor_clip => monitor
+                            .current_frame()
+                            .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height)),
+                        None => None,
+                    }
                 };
             if let Some((rgba, fw, fh)) = framed {
                 layers.push(make_layer(clip, canvas_rect, fw, fh, rgba, t));
@@ -737,12 +847,15 @@ impl EditorApp {
     }
 
     // ---- timeline ----------------------------------------------------------
+    #[allow(clippy::too_many_arguments)]
     fn timeline_ui(
         ui: &mut egui::Ui,
         editor: &mut Editor,
         monitor: &mut Monitor,
         drag: &mut Option<ClipDrag>,
         scrubbing: &mut bool,
+        thumb_cache: &mut FrameCache,
+        thumbs: &mut std::collections::HashMap<String, egui::TextureHandle>,
     ) {
         // Timeline toolbar (zoom, add track / text).
         ui.horizontal(|ui| {
@@ -840,6 +953,48 @@ impl EditorApp {
                         let selected = editor.is_selected(&el.id);
                         let linked = highlight.contains(&el.id);
                         painter.rect_filled(cr, 4.0, base);
+
+                        // Poster-frame thumbnail for video clips.
+                        if track.kind == "video" {
+                            if let Some(mi) = el
+                                .media_id
+                                .as_deref()
+                                .and_then(|m| editor.media.get(m))
+                            {
+                                let st = el.source_start.unwrap_or(0.0);
+                                let key = format!("{}|{}", mi.path, (st * 2.0) as i64);
+                                if !thumbs.contains_key(&key) {
+                                    if let Some(fr) =
+                                        thumb_cache.get(&mi.path, st, mi.width, mi.height)
+                                    {
+                                        let img = egui::ColorImage::from_rgba_unmultiplied(
+                                            [fr.width as usize, fr.height as usize],
+                                            &fr.rgba,
+                                        );
+                                        let tex = ui.ctx().load_texture(
+                                            &key,
+                                            img,
+                                            egui::TextureOptions::LINEAR,
+                                        );
+                                        thumbs.insert(key.clone(), tex);
+                                    }
+                                }
+                                if let Some(tex) = thumbs.get(&key) {
+                                    let asp = tex.aspect_ratio().max(0.1);
+                                    let tw = (cr.height() * asp).min(cr.width());
+                                    let trect = Rect::from_min_size(
+                                        cr.min,
+                                        Vec2::new(tw, cr.height()),
+                                    );
+                                    painter.image(
+                                        tex.id(),
+                                        trect,
+                                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                        Color32::from_white_alpha(150),
+                                    );
+                                }
+                            }
+                        }
                         if linked {
                             painter.rect_stroke(cr, 4.0, Stroke::new(2.0, Color32::from_rgb(240, 210, 60)));
                         }
@@ -897,9 +1052,9 @@ impl EditorApp {
                     if in_ruler {
                         *scrubbing = true;
                         if let Some(p) = pointer {
-                            let t = time_of(p.x).clamp(0.0, dur);
-                            editor.playhead = t;
-                            monitor.seek(&editor.data, t);
+                            // Update the playhead only; the preview refreshes from
+                            // the frame cache. The player is re-pointed on release.
+                            editor.playhead = time_of(p.x).clamp(0.0, dur);
                         }
                     } else if let Some((id, ts, edge, locked)) = &hit {
                         if !locked {
@@ -917,9 +1072,7 @@ impl EditorApp {
                 } else if resp.dragged() {
                     if *scrubbing {
                         if let Some(p) = pointer {
-                            let t = time_of(p.x).clamp(0.0, dur);
-                            editor.playhead = t;
-                            monitor.seek(&editor.data, t);
+                            editor.playhead = time_of(p.x).clamp(0.0, dur);
                         }
                     } else if let Some(d) = drag.as_ref() {
                         if let Some(p) = pointer {
@@ -960,6 +1113,10 @@ impl EditorApp {
                 } else if resp.drag_stopped() {
                     if let Some(d) = drag.take() {
                         editor.end_interaction(d.before);
+                    }
+                    if *scrubbing {
+                        // Re-point the streaming player to where the scrub landed.
+                        monitor.seek(&editor.data, editor.playhead);
                     }
                     *scrubbing = false;
                 } else if resp.clicked() {
@@ -1064,6 +1221,17 @@ fn nice_step(pps: f32) -> f64 {
         }
     }
     600.0
+}
+
+/// The user's Desktop directory (best-effort), for default export output.
+fn dirs_desktop() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let desk = std::path::Path::new(&home).join("Desktop");
+    if desk.is_dir() {
+        Some(desk)
+    } else {
+        Some(std::path::PathBuf::from(home))
+    }
 }
 
 fn clip_color(kind: &str) -> Color32 {
