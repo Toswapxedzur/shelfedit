@@ -30,19 +30,19 @@ pub struct Monitor {
 }
 
 /// The top-most active video clip covering timeline time `t` on a visible track.
+/// Tracks earlier in the array composite on top, so the first match wins.
 pub fn active_video_clip<'a>(data: &'a TimelineData, t: f64) -> Option<&'a Element> {
-    let mut chosen: Option<&Element> = None;
     for track in &data.tracks {
         if track.kind != "video" || track.is_hidden() {
             continue;
         }
         for el in &track.elements {
             if el.media_id.is_some() && t >= el.timeline_start && t < el.end() {
-                chosen = Some(el); // last in array order = top-most
+                return Some(el);
             }
         }
     }
-    chosen
+    None
 }
 
 /// Active text clips at time `t` on visible text tracks.
@@ -98,6 +98,10 @@ impl Monitor {
 
     pub fn current_frame(&self) -> Option<&Frame> {
         self.player.as_ref().and_then(|p| p.cur.as_ref())
+    }
+
+    pub fn current_clip_id(&self) -> Option<&str> {
+        self.clip_id.as_deref()
     }
 
     pub fn cur_version(&self) -> u64 {
