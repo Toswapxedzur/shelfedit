@@ -228,7 +228,29 @@ pub fn run() {
         total += ms;
         println!("scrub @{t:>7.1}s : {ms:>6.0} ms  {}", if ok { "" } else { "FAIL" });
     }
-    println!("scrub avg  : {:.0} ms", total / points.len() as f64);
+    println!("scrub avg  : {:.0} ms  (ffmpeg per-frame fallback)", total / points.len() as f64);
+
+    // --- warm hardware decoder (macOS AVFoundation) --------------------------
+    #[cfg(target_os = "macos")]
+    {
+        match crate::avdecode::AvDecoder::open(&p.media_path, 1280) {
+            Ok(mut dec) => {
+                let mut total = 0.0;
+                for &t in &points {
+                    let s = Instant::now();
+                    let ok = dec.frame_at(t).is_ok();
+                    let ms = s.elapsed().as_secs_f64() * 1000.0;
+                    total += ms;
+                    println!("AV scrub @{t:>7.1}s : {ms:>6.0} ms  {}", if ok { "" } else { "FAIL" });
+                }
+                println!(
+                    "AV scrub avg: {:.0} ms  (warm AVFoundation hardware decoder)",
+                    total / points.len() as f64
+                );
+            }
+            Err(e) => println!("AV decoder: unavailable ({e})"),
+        }
+    }
 
     println!("== self-test complete ==");
 }

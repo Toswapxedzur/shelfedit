@@ -168,23 +168,68 @@ pub fn decode_one(path: &str, t: f64, out_w: u32, out_h: u32) -> Result<Frame> {
 }
 
 /// Background scrub worker: coalesces seek targets and decodes the latest one.
+/// A single-frame decoder backend. Given a source time it returns the frame at
+/// (or nearest at/behind) that time. macOS uses a persistent, hardware
+/// AVFoundation generator kept warm across seeks; other platforms fall back to
+/// the FFmpeg CLI. New platforms slot in behind this trait.
+pub trait FrameDecoder: Send {
+    fn frame_at(&mut self, t: f64) -> Result<Frame>;
+}
+
+/// Portable fallback: one FFmpeg process per frame (used off-macOS or if the
+/// platform decoder can't open the file).
+struct FfmpegDecoder {
+    path: String,
+    w: u32,
+    h: u32,
+}
+impl FrameDecoder for FfmpegDecoder {
+    fn frame_at(&mut self, t: f64) -> Result<Frame> {
+        decode_one(&self.path, t, self.w, self.h)
+    }
+}
+
+/// Pick the best single-frame decoder for this platform/media.
+fn open_decoder(path: &str, max_dim: u32, src_w: u32, src_h: u32) -> Box<dyn FrameDecoder> {
+    #[cfg(target_os = "macos")]
+    {
+        match crate::avdecode::AvDecoder::open(path, max_dim) {
+            Ok(d) => return Box::new(d),
+            Err(e) => log::warn!("AVFoundation decoder unavailable for {path}: {e}; using ffmpeg"),
+        }
+    }
+    let (w, h) = preview_size(src_w.max(2), src_h.max(2), max_dim);
+    Box::new(FfmpegDecoder {
+        path: path.to_string(),
+        w,
+        h,
+    })
+}
+
+/// Background scrub worker: owns a single persistent decoder and services the
+/// most recent requested time (coalesced), so a fast drag never queues a
+/// backlog and each frame reuses the warm decoder.
 pub struct SeekWorker {
     target_tx: std::sync::mpsc::Sender<f64>,
     pub frame_rx: Receiver<Frame>,
 }
 
 impl SeekWorker {
-    pub fn new(path: String, out_w: u32, out_h: u32) -> Self {
+    pub fn new(path: String, max_dim: u32, src_w: u32, src_h: u32) -> Self {
         let (target_tx, target_rx) = std::sync::mpsc::channel::<f64>();
         let (frame_tx, frame_rx) = sync_channel::<Frame>(2);
         thread::spawn(move || {
+            let mut dec = open_decoder(&path, max_dim, src_w, src_h);
             while let Ok(mut t) = target_rx.recv() {
                 // Coalesce: only decode the most recent requested target.
                 while let Ok(nt) = target_rx.try_recv() {
                     t = nt;
                 }
-                if let Ok(frame) = decode_one(&path, t, out_w, out_h) {
-                    let _ = frame_tx.send(frame);
+                match dec.frame_at(t) {
+                    Ok(frame) => {
+                        let _ = frame_tx.send(frame);
+                    }
+                    Err(e) => log::debug!("scrub decode failed at {t:.3}: {e}"),
                 }
             }
         });
@@ -242,13 +287,28 @@ impl FrameCache {
         if let Some(f) = self.cache.get(&key) {
             return Some(f.clone());
         }
-        let (ow, oh) = preview_size(src_w.max(2), src_h.max(2), self.max_dim);
+        let max_dim = self.max_dim;
         let worker = self
             .workers
             .entry(path.to_string())
-            .or_insert_with(|| SeekWorker::new(path.to_string(), ow, oh));
+            .or_insert_with(|| SeekWorker::new(path.to_string(), max_dim, src_w.max(2), src_h.max(2)));
         worker.request(t);
-        None
+
+        // Not decoded yet: land on the nearest already-decoded frame for this
+        // media (within ~0.5s) so a fast scrub shows a close frame that refines,
+        // instead of a blank or a stale unrelated one.
+        let tq = qkey(t);
+        let mut best: Option<(i64, Arc<Frame>)> = None;
+        for ((p, k), fr) in self.cache.iter() {
+            if p != path {
+                continue;
+            }
+            let d = (k - tq).abs();
+            if d <= 5 && best.as_ref().map(|(bd, _)| d < *bd).unwrap_or(true) {
+                best = Some((d, fr.clone()));
+            }
+        }
+        best.map(|(_, fr)| fr)
     }
 
     fn evict(&mut self) {

@@ -5,6 +5,8 @@
 
 mod app;
 mod audio;
+#[cfg(target_os = "macos")]
+mod avdecode;
 mod commands;
 mod compositor;
 mod db;
