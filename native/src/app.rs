@@ -53,6 +53,10 @@ pub struct EditorApp {
 
     export: Option<crate::render::ExportHandle>,
     export_msg: Option<String>,
+
+    /// Last successfully-shown frame per clip, held during scrub cache misses so
+    /// the preview never flickers to a blank or a stale unrelated frame.
+    last_frame: std::collections::HashMap<String, (Arc<Vec<u8>>, u32, u32)>,
 }
 
 impl EditorApp {
@@ -92,6 +96,7 @@ impl EditorApp {
                     thumbs: std::collections::HashMap::new(),
                     export: None,
                     export_msg: None,
+                    last_frame: std::collections::HashMap::new(),
                 }
             }
             Err(e) => Self {
@@ -108,6 +113,7 @@ impl EditorApp {
                 thumbs: std::collections::HashMap::new(),
                 export: None,
                 export_msg: None,
+                last_frame: std::collections::HashMap::new(),
             },
         }
     }
@@ -197,8 +203,9 @@ impl eframe::App for EditorApp {
                     thumbs,
                 );
             });
+        let last_frame = &mut self.last_frame;
         egui::CentralPanel::default().show(ctx, |ui| {
-            Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache);
+            Self::preview_ui(ui, editor, monitor, tex_id, gpu, frame_cache, last_frame);
         });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(if playing { 8 } else { 33 }));
@@ -657,6 +664,7 @@ impl EditorApp {
     }
 
     // ---- preview -----------------------------------------------------------
+    #[allow(clippy::too_many_arguments)]
     fn preview_ui(
         ui: &mut egui::Ui,
         editor: &mut Editor,
@@ -664,6 +672,7 @@ impl EditorApp {
         tex: Option<TextureId>,
         gpu: bool,
         frame_cache: &mut FrameCache,
+        last_frame: &mut std::collections::HashMap<String, (Arc<Vec<u8>>, u32, u32)>,
     ) {
         // transport
         ui.horizontal(|ui| {
@@ -728,7 +737,9 @@ impl EditorApp {
 
             // While playing, the monitor's live stream drives the clip it owns;
             // when paused/scrubbing everything comes from the fast, cached frame
-            // cache (falling back to the last live frame on a cache miss).
+            // cache. On a cache miss we hold this clip's last shown frame (never
+            // a blank or a stale *other* time), refreshing when the exact frame
+            // lands — so scrubbing tracks the cursor without flicker.
             let is_monitor_clip = cur_clip_id.as_deref() == Some(clip.id.as_str());
             let framed: Option<(Arc<Vec<u8>>, u32, u32)> =
                 if monitor.is_playing() && is_monitor_clip {
@@ -736,15 +747,22 @@ impl EditorApp {
                         .current_frame()
                         .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
                 } else {
-                    match frame_cache.get(&mi.path, source_t, mi.width, mi.height) {
-                        Some(f) => Some((Arc::new(f.rgba.clone()), f.width, f.height)),
-                        None if is_monitor_clip => monitor
-                            .current_frame()
-                            .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height)),
-                        None => None,
-                    }
+                    frame_cache
+                        .get(&mi.path, source_t, mi.width, mi.height)
+                        .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                        .or_else(|| last_frame.get(&clip.id).cloned())
+                        .or_else(|| {
+                            if is_monitor_clip {
+                                monitor
+                                    .current_frame()
+                                    .map(|f| (Arc::new(f.rgba.clone()), f.width, f.height))
+                            } else {
+                                None
+                            }
+                        })
                 };
             if let Some((rgba, fw, fh)) = framed {
+                last_frame.insert(clip.id.clone(), (rgba.clone(), fw, fh));
                 layers.push(make_layer(clip, canvas_rect, fw, fh, rgba, t));
             }
         }

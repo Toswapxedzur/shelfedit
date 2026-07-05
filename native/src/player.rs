@@ -35,7 +35,7 @@ pub struct Player {
 impl Player {
     pub fn new(path: String, src_w: u32, src_h: u32, duration: f64, fps: u32) -> Self {
         let (out_w, out_h) = preview_size(src_w, src_h, 1280);
-        let seeker = SeekWorker::new(path.clone(), out_w, out_h);
+        let seeker = SeekWorker::new(path.clone(), 1280, src_w, src_h);
         let mut p = Self {
             path,
             duration,
