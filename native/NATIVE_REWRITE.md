@@ -136,11 +136,41 @@ pixel screenshots can't be captured from here. Launch it yourself with
 - `app.rs`    — egui UI: preview + transport + HUD.
 - `selftest.rs` — headless benchmark.
 
-## Next (Slice 2 entry points)
+## Slice 2 — editor UI + editing brain (DONE)
 
-- Timeline model is already parsed (`model.rs`); extend `Player` to composite
-  multiple tracks/clips (it currently plays one source file for the proof).
-- Add the decoded-frame/thumbnail LRU cache in `decode.rs` for instant scrub.
-- Move preview upload from egui texture to a dedicated wgpu render pass (YUV
-  upload + shader convert + transform/crop/color/chroma) — the true zero-copy
-  compositor.
+Ported the whole editor from the legacy React app: layout, every button, and
+the editing logic behind them. Verified headlessly on the real `testre`
+project (`cargo run --release -- --edittest`).
+
+- Full-fidelity data model (`model.rs`): transform, color, chroma, crop, mask,
+  keyframes, fades, volume, speed, groupId, track hidden/locked — exact JSON
+  round-trip, unknown fields preserved.
+- Pure timeline ops (`ops.rs`): split, trim start/end, move-group (magnet),
+  ripple delete, duplicate, link/unlink, add/remove/move track, keyframes,
+  effect resolution (keyframe + fade interpolation).
+- Command layer (`commands.rs`): one typed vocabulary; the toolbar/inspector and
+  (future) AI go through `apply_command`.
+- Editor state (`editor.rs`): selection, mode, snapping, zoom, undo/redo history,
+  debounced autosave → **new timeline version** in SQLite (legacy stays readable).
+- Timeline monitor (`monitor.rs`): maps the timeline clock to source clips and
+  drives the Slice-1 hardware player, re-pointing across cuts. Plays the
+  top-most active video clip + audio; text overlays drawn on top.
+- UI (`app.rs`): top bar, mode/tool strip (Select/Transform/Crop/Blade/Text +
+  Split/Duplicate/Delete/Ripple/Flip/Rotate/Reset/Link/Unlink/Snap/Undo/Redo),
+  left inspector (Layer/Transitions/Keyframes/Color/Crop/Chroma/Mask/Audio/Text),
+  bottom timeline (ruler + scrub, track headers with show/lock/move/remove,
+  clips with select/drag-move/trim/blade, zoom), center GPU preview compositing
+  the active clip with transform/opacity/crop/flip + text, transport, and
+  keyboard shortcuts (space, del/ripple, ⌘Z/⇧⌘Z, ⌘D, V/W/C/B/X, S).
+
+Known limits (next slices): color grade / chroma / mask are stored + editable
+but not yet rendered in the preview (need the wgpu shader pass); live compositing
+of simultaneous video layers (PiP) isn't done — playback shows the top clip.
+
+## Next
+
+- wgpu shader compositor pass: YUV upload + color grade + chroma + mask, and
+  multi-layer live compositing.
+- Decoded-frame/thumbnail LRU cache in `decode.rs` for instant scrub + PiP.
+- Import / Export (FFmpeg encode from the timeline) and the AI command bridge
+  (the Rust `Command` enum is the catalogue).
