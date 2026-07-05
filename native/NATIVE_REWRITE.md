@@ -163,14 +163,31 @@ project (`cargo run --release -- --edittest`).
   the active clip with transform/opacity/crop/flip + text, transport, and
   keyboard shortcuts (space, del/ripple, ⌘Z/⇧⌘Z, ⌘D, V/W/C/B/X, S).
 
-Known limits (next slices): color grade / chroma / mask are stored + editable
-but not yet rendered in the preview (need the wgpu shader pass); live compositing
-of simultaneous video layers (PiP) isn't done — playback shows the top clip.
+## Slice 3 — GPU compositor (DONE)
+
+Real preview compositing via a custom `wgpu` render pass run *inside* the egui
+frame (an `egui_wgpu` paint callback). The inspector controls now visibly do
+what they say.
+
+- WGSL shader (`preview.wgsl`) per layer: quad transform (scale/pos/rotation),
+  crop (uv sub-rect), flip, **color grade** (brightness/contrast/saturation),
+  **green-screen / chroma key**, **rectangular mask**, opacity/fades —
+  premultiplied-alpha output to match egui's blend.
+- `compositor.rs`: pipeline + per-layer texture/uniform slots stored in egui's
+  callback resources; one draw call per layer, composited in track order (top
+  track on top).
+- `decode.rs` `FrameCache`: per-media coalescing async decode + LRU cache so
+  non-primary / paused layers get frames without stalling the UI. The clip the
+  monitor is actively decoding uses its live frame; the rest come from the cache.
+- Multi-layer live compositing (PiP / overlays) now works; the monitor still
+  drives audio + the top clip's stream.
+- glow fallback path keeps a basic textured preview (no shader effects) if wgpu
+  is unavailable.
 
 ## Next
 
-- wgpu shader compositor pass: YUV upload + color grade + chroma + mask, and
-  multi-layer live compositing.
-- Decoded-frame/thumbnail LRU cache in `decode.rs` for instant scrub + PiP.
+- Audio mixing that honours per-clip volume + fades and multiple audio tracks
+  (currently plays the top clip's source audio at unity).
 - Import / Export (FFmpeg encode from the timeline) and the AI command bridge
-  (the Rust `Command` enum is the catalogue).
+  (the Rust `Command` enum is already the catalogue).
+- Thumbnail strip on timeline clips (reuse `FrameCache`).
