@@ -2,6 +2,15 @@ import AppKit
 
 enum ShelfStyle {
     static let fontName = "Arial"
+    static let radiusControl: CGFloat = 10
+    static let radiusCard: CGFloat = 14
+    static let radiusPanel: CGFloat = 16
+    static let radiusPill: CGFloat = 999
+    static let space2: CGFloat = 8
+    static let space3: CGFloat = 12
+    static let space4: CGFloat = 16
+    static let controlHeight: CGFloat = 32
+    static let mainControlHeight: CGFloat = 36
     static let heading = NSColor(hex: 0x111827)
     static let text = NSColor(hex: 0x1f2937)
     static let body = NSColor(hex: 0x475569)
@@ -94,7 +103,7 @@ final class AppBackgroundView: NSView {
 }
 
 class GlassPanelView: NSView {
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = ShelfStyle.radiusPanel
     var fillColor: NSColor = ShelfStyle.panel
 
     override init(frame frameRect: NSRect) {
@@ -104,7 +113,7 @@ class GlassPanelView: NSView {
         layer?.masksToBounds = false
         layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
         layer?.shadowOpacity = 0.22
-        layer?.shadowRadius = 22
+        layer?.shadowRadius = 18
         layer?.shadowOffset = CGSize(width: 0, height: -10)
     }
 
@@ -160,12 +169,12 @@ final class StyledButton: NSButton {
         self.action = action
         isBordered = false
         bezelStyle = .regularSquare
-        font = ShelfStyle.bold(size: 10)
+        font = ShelfStyle.bold(size: 12)
         contentTintColor = ShelfStyle.buttonText
         wantsLayer = true
         setButtonType(.momentaryPushIn)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 28).isActive = true
+        heightAnchor.constraint(equalToConstant: variant == .pill ? 30 : ShelfStyle.controlHeight).isActive = true
     }
 
     required init?(coder: NSCoder) {
@@ -175,7 +184,7 @@ final class StyledButton: NSButton {
     override func updateLayer() {
         super.updateLayer()
         let disabledAlpha: CGFloat = isEnabled ? 1 : 0.45
-        layer?.cornerRadius = variant == .pill ? 14 : 10
+        layer?.cornerRadius = variant == .pill ? 15 : ShelfStyle.radiusControl
         layer?.masksToBounds = false
         switch variant {
         case .primary:
@@ -183,7 +192,7 @@ final class StyledButton: NSButton {
             contentTintColor = ShelfStyle.navy.withAlphaComponent(disabledAlpha)
             layer?.shadowColor = ShelfStyle.navy.cgColor
             layer?.shadowOpacity = 0.18
-            layer?.shadowRadius = 8
+            layer?.shadowRadius = 6
             layer?.shadowOffset = CGSize(width: 0, height: -2)
         case .secondary:
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
@@ -196,7 +205,7 @@ final class StyledButton: NSButton {
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
             layer?.shadowColor = ShelfStyle.navy2.cgColor
             layer?.shadowOpacity = isEnabled ? 0.18 : 0
-            layer?.shadowRadius = 7
+            layer?.shadowRadius = 6
             layer?.shadowOffset = CGSize(width: 0, height: -2)
             contentTintColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha)
         }
@@ -211,17 +220,17 @@ final class StyledPopupButton: NSPopUpButton {
     init() {
         super.init(frame: .zero, pullsDown: false)
         isBordered = false
-        font = ShelfStyle.bold(size: 10)
+        font = ShelfStyle.bold(size: 12)
         contentTintColor = ShelfStyle.buttonText
         wantsLayer = true
         layer?.backgroundColor = ShelfStyle.whiteButton.cgColor
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = ShelfStyle.radiusControl
         layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
         layer?.shadowOpacity = 0.08
         layer?.shadowRadius = 6
         layer?.shadowOffset = CGSize(width: 0, height: -2)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 28).isActive = true
+        heightAnchor.constraint(equalToConstant: ShelfStyle.controlHeight).isActive = true
     }
 
     required init?(coder: NSCoder) {
@@ -235,11 +244,11 @@ final class AccentPanelView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = ShelfStyle.radiusCard
         layer?.backgroundColor = ShelfStyle.childPanel.cgColor
         layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
         layer?.shadowOpacity = 0.08
-        layer?.shadowRadius = 10
+        layer?.shadowRadius = 12
         layer?.shadowOffset = CGSize(width: 0, height: -3)
     }
 

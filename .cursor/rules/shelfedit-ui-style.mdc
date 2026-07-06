@@ -39,20 +39,239 @@ engineered, and trustworthy.
 - Avoid similar color stacks such as grey-white-blue-white nested together. Each
   colored surface must have clear contrast against its parent.
 
-## Soft Precision Scale
+## Exact Soft Precision Tokens
 
-- Small controls: 8-10px radius.
-- Normal buttons / inputs: 10-12px radius.
-- Cards / panels: 12-16px radius.
-- Large modal panels: 16-20px radius.
-- Pills / chips / nav tabs: 999px radius.
-- Buttons: 30-40px high, 12-18px horizontal padding, 12-14px text, 700 weight.
-- Inputs: 36-44px high, embedded feel via inset shadow, no hard border.
-- Shadows:
-  - tiny elevation: `0 2px 6px rgba(15,23,42,0.06)`
-  - normal card: `0 8px 24px rgba(15,23,42,0.08)`
-  - hover card: `0 12px 28px rgba(15,23,42,0.12)`
-  - floating panel/modal: `0 18px 44px rgba(15,23,42,0.22)`
+Use these values as the source of truth. The style is compact, rounded,
+engineered, and calm. It avoids sharpness, loud decoration, and hard borders,
+but it should still feel functional and trustworthy.
+
+### Corners
+
+- Small controls: `8-10px` radius.
+- Normal buttons / inputs: `10-12px`.
+- Cards / panels: `12-16px`.
+- Large modal panels: `16-20px`.
+- Pills / chips / nav tabs: `999px`.
+- Avoid `0-4px` unless the UI is intentionally technical, terminal-like, or
+  table-heavy.
+- Avoid `24px+` for ordinary dashboards; it can feel toy-like.
+- Default tokens:
+  - `--radius-control: 10px`
+  - `--radius-card: 14px`
+  - `--radius-panel: 16px`
+  - `--radius-pill: 999px`
+
+### Shadows
+
+- Use shadows for soft separation instead of hard borders.
+- Tiny elevation: `0 2px 6px rgba(15,23,42,0.06)`.
+- Normal card: `0 8px 24px rgba(15,23,42,0.08)`.
+- Hover card: `0 12px 28px rgba(15,23,42,0.12)`.
+- Floating panel/modal: `0 16px 40px rgba(15,23,42,0.16-0.24)`.
+- Comfortable modal: `0 18px 44px rgba(15,23,42,0.22)`.
+- Avoid dark shadows above `0.30` opacity unless it is a modal overlay.
+- Avoid sharp, short shadows like `0 1px 1px black`.
+
+### Borders
+
+- Prefer invisible or very soft borders.
+- Normal border opacity: `0.12-0.25`.
+- Input inset border: `rgba(..., 0.35-0.50)`.
+- Strong active border: `0.35-0.55`.
+- Border width: almost always `1px`.
+- For ShelfEdit desktop/editor chrome, avoid visible thin borders; use fills,
+  shadows, spacing, and inset input shadows instead.
+- Comfortable input inset:
+  `box-shadow: inset 0 0 0 1px rgba(148,163,184,0.45)`.
+
+### Buttons
+
+- Buttons are rounded rectangles, compact, and confident.
+- Height: `30-40px`.
+- Compact toolbar button height: `28-32px`.
+- Main button height: `36-44px`.
+- Horizontal padding: `12-18px`.
+- Vertical padding: `7-10px`.
+- Radius: `10-12px`.
+- Font size: `12-14px`.
+- Font weight: `650-750`, usually `700`.
+- Hover lift: `translateY(-1px)` or none.
+- Hover brightness shift: `0.94-1.06`.
+- Transition: `120-180ms ease`.
+- Tiny toolbar icon buttons: `36px` by `36px`, `10px` radius.
+- Navigation/filter pills: min-height `28px`, padding `5px 12px`, `999px`
+  radius, `12px` text, `700` weight.
+
+### Inputs
+
+- Inputs should feel embedded, not heavily boxed.
+- Height: `36-44px`.
+- Padding: `9-12px`.
+- Radius: `10-12px`.
+- Font size: `13-14px`.
+- Focus ring: `2-3px` outer glow at `0.14-0.22` opacity.
+- Textarea minimum height: `96-300px`, depending on use.
+- Focus shadow:
+  `inset 0 0 0 1px currentColor, 0 0 0 3px rgba(30,58,138,0.18)`.
+
+### Cards And Panels
+
+- Cards are the main object language.
+- Small card width: `280-360px`.
+- Medium card width: `420-640px`.
+- Large tool panel: `720-1040px`.
+- Card padding: `14-20px`.
+- Large panel padding: `20-32px`.
+- Card radius: `14-16px`.
+- Internal gap: `10-16px`.
+- Card hover lift: `1-3px`.
+- Avoid nested cards unless the inner card is a real repeated item.
+
+### Spacing
+
+- Use a compact but breathable spacing scale:
+  - `--space-1: 4px`
+  - `--space-2: 8px`
+  - `--space-3: 12px`
+  - `--space-4: 16px`
+  - `--space-5: 20px`
+  - `--space-6: 24px`
+  - `--space-8: 32px`
+  - `--space-10: 40px`
+- Gap between icon and text: `6-10px`.
+- Gap between form fields: `10-14px`.
+- Gap between card sections: `14-24px`.
+- Page/content padding: `16-32px`.
+- Dense panel padding: `12-16px`.
+- Marketing/hero padding: `32-64px`.
+
+### Typography
+
+- Use `Arial, Helvetica, system-ui, sans-serif`.
+- Tiny metadata: `10-11px`.
+- Secondary metadata: `11-12px`.
+- Body UI text: `12-14px`.
+- Normal body paragraph: `14-16px`.
+- Card heading: `16-21px`.
+- Panel heading: `20-28px`.
+- Hero heading: `36-56px`.
+- Body weight: `400-500`.
+- Metadata labels: `600-700`.
+- Buttons: `700`.
+- Headings: `700-800`.
+- Dense UI line-height: `1.2-1.35`.
+- Body UI line-height: `1.4-1.5`.
+- Reading line-height: `1.55-1.7`.
+- Avoid negative letter spacing. Tiny uppercase labels may use `0.03em`.
+
+### Chips / Tags
+
+- Chips are pill-like and compact.
+- Height: `22-30px`.
+- Padding: `3-8px` or `5-10px`.
+- Radius: `999px`.
+- Font size: `10-12px`.
+- Weight: `700`.
+- Uppercase category tags are acceptable.
+- Gap between chips: `6px`.
+
+### Modals / Popups
+
+- Popups should feel local and soft.
+- Modal radius: `16-20px`.
+- Popup radius: `12-14px`.
+- Popup padding: `10-16px`.
+- Modal padding: `20-28px`.
+- Overlay tint: `rgba(15,23,42,0.08-0.24)`.
+- Backdrop blur: `1-8px`.
+- Popup shadow: `0 14px 34px rgba(15,23,42,0.22-0.28)`.
+- Entry motion: `translateY(6-10px) scale(0.96-0.98)` to normal.
+- Duration: `160-220ms`.
+
+### Motion
+
+- Motion should be gentle and functional.
+- Micro transitions: `120-160ms`.
+- Popup transitions: `180-220ms`.
+- Page/card focus transitions: `240-420ms`.
+- Hover lift: `1-3px`.
+- Hover scale: `1.02-1.06`.
+- Icon-only playful hover max: `1.08-1.12`.
+- Avoid springy/bouncy animation unless the product is playful.
+
+### Layout Density
+
+- Compact, not sparse.
+- Sidebar width: `280-320px`.
+- Toolbar height: `48-56px`.
+- Panel max width for reading: `640-760px`.
+- Tool card width: `720-1040px`.
+- Form row height: `40-48px`.
+- Data row height: `36-52px`.
+- Use `12px` or `16px` as the default internal card spacing. Use `24px` only
+  for larger separations.
+
+### Plain JS/CSS Reconstruction Reference
+
+When another implementation needs to recreate the scene, start from this exact
+token object and apply it before product-specific colors:
+
+```js
+const softPrecision = {
+  radius: {
+    control: 10,
+    card: 14,
+    panel: 16,
+    modal: 18,
+    pill: 999,
+  },
+  shadow: {
+    tiny: "0 2px 6px rgba(15,23,42,0.06)",
+    card: "0 8px 24px rgba(15,23,42,0.08)",
+    hover: "0 12px 28px rgba(15,23,42,0.12)",
+    popup: "0 14px 34px rgba(15,23,42,0.26)",
+    modal: "0 18px 44px rgba(15,23,42,0.22)",
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 24,
+    xxl: 32,
+  },
+  typography: {
+    family: "Arial, Helvetica, system-ui, sans-serif",
+    tiny: 10,
+    meta: 11,
+    ui: 13,
+    body: 14,
+    cardHeading: 16,
+    panelHeading: 24,
+    weightBody: 500,
+    weightMeta: 700,
+    weightButton: 700,
+    weightHeading: 800,
+  },
+  controls: {
+    toolbarHeight: 52,
+    compactButtonHeight: 32,
+    buttonHeight: 36,
+    mainButtonHeight: 40,
+    inputHeight: 40,
+    chipHeight: 24,
+    buttonPaddingX: 14,
+    inputPaddingX: 12,
+  },
+  motion: {
+    microMs: 140,
+    popupMs: 200,
+    focusMs: 320,
+    hoverLiftPx: -1,
+    cardLiftPx: -2,
+  },
+};
+```
 
 ## Website UI
 
