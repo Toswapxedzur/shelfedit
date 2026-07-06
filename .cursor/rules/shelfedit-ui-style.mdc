@@ -20,8 +20,13 @@ engineered, and trustworthy.
 - Do not use WebView or HTML to transport decoded video frames. Web/native/custom
   UI choices must not break the zero-copy or near-zero-copy media path.
 - Use Arial, Helvetica, sans-serif everywhere.
-- Default canvas/background is grey or dark grey. Individual boxes/cards are
-  white unless the screen explicitly needs a black/dark media surface.
+- Default canvas/background is dark grey, around `#202020` to `#2b2b2b`.
+  Individual top-level boxes/cards are white unless the screen explicitly needs
+  a black/dark media surface.
+- Avoid parent and child boxes with the same fill color. If a parent box is
+  white, child boxes must use off-white, light grey, or a semantic light color;
+  if a parent uses a semantic light color, children should use white or a
+  visibly different semantic tint.
 - No thin borders anywhere. Use soft shadows, inset shadows, fills, and spacing
   instead of 1px outline borders.
 - Every component that floats above another surface needs a shadow.
@@ -120,7 +125,9 @@ when contrast matters.
   - light: `#fee2e2`
   - heavy: `#b91c1c`
 - Neutral surfaces:
-  - canvas grey: `#e5e7eb`
+  - canvas dark grey: `#202020`
+  - secondary canvas dark grey: `#2b2b2b`
+  - child off-white: `#f8fafc`
   - box white: `#ffffff`
   - dark media surface: `#111827`
 
@@ -153,7 +160,10 @@ user or use neutral/generic grey until a precise color is assigned.
 ## Extension / App UI
 
 - Same font: Arial, sans-serif.
-- Popup/app background: vertical gradient `#f8fafc` to `#eef2ff`.
+- Browser extension popups may keep the light vertical gradient `#f8fafc` to
+  `#eef2ff`.
+- ShelfEdit desktop/editor app backgrounds use the dark grey canvas
+  `#202020` / `#2b2b2b`; top-level boxes float above it in white.
 - Main panels: translucent white `rgba(255,255,255,0.92)`, `border-radius: 16px`,
   shadow `0 12px 34px rgba(15,23,42,0.08)`.
 - App buttons are smaller: primary navy `#1e3a8a`, white text,

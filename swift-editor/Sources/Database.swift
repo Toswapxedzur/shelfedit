@@ -136,6 +136,35 @@ final class ShelfDatabase {
         }
     }
 
+    func insertMediaAsset(_ asset: MediaAsset, sizeBytes: Int64?) throws {
+        try withDB { db in
+            try execute(
+                db,
+                sql: """
+                INSERT INTO media_assets (
+                    id, project_id, type, storage_kind, original_filename,
+                    local_path, relative_path, sha256, duration_seconds, width,
+                    height, size_bytes, description, tags_json, thumbnail_path,
+                    created_at
+                )
+                VALUES (?, ?, ?, 'local', ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, datetime('now'))
+                """,
+                binds: [
+                    asset.id,
+                    asset.projectId,
+                    asset.type,
+                    asset.originalFilename,
+                    asset.localPath,
+                    String(asset.duration),
+                    String(asset.width),
+                    String(asset.height),
+                    sizeBytes.map(String.init) ?? "",
+                    asset.thumbnailPath ?? "",
+                ]
+            )
+        }
+    }
+
     private func withDB<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX

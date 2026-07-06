@@ -1,7 +1,23 @@
 import AppKit
 
+enum ToolShelfAction {
+    case importLocal
+    case importURL
+    case importProjectRender
+    case addText
+    case recognizeSelectedAudio
+}
+
+enum InspectorProperty {
+    case speed
+    case amplification
+    case size
+}
+
 @MainActor
 final class ToolShelfView: GlassPanelView {
+    var onAction: ((ToolShelfAction) -> Void)?
+
     private let content = NSStackView()
     private let projectMedia = NSStackView()
 
@@ -48,16 +64,27 @@ final class ToolShelfView: GlassPanelView {
             "Import from other project",
             "Use final video without render",
         ]))
+        content.addArrangedSubview(actionRow([
+            ("Import local", #selector(importLocal)),
+            ("Import URL", #selector(importURL)),
+        ], accent: ShelfStyle.assetHeavy))
         content.addArrangedSubview(section("Text", accent: ShelfStyle.textHeavy, rows: [
             "Add text",
             "Caption track",
             "Style preset",
         ]))
+        content.addArrangedSubview(actionRow([
+            ("Add text", #selector(addText)),
+            ("Other project", #selector(importProjectRender)),
+        ], accent: ShelfStyle.textHeavy))
         content.addArrangedSubview(section("Voice Recognition", accent: ShelfStyle.audioHeavy, rows: [
             "Audio selection -> text",
             "Target caption track",
             "Transcript language",
         ]))
+        content.addArrangedSubview(actionRow([
+            ("Recognize audio", #selector(recognizeSelectedAudio)),
+        ], accent: ShelfStyle.audioHeavy))
         content.addArrangedSubview(panelTitle("Project Assets"))
         projectMedia.orientation = .vertical
         projectMedia.alignment = .leading
@@ -87,9 +114,10 @@ final class ToolShelfView: GlassPanelView {
 
     private func toolButton(_ title: String, _ subtitle: String) -> NSView {
         let button = AccentPanelView()
-        button.accentColor = ShelfStyle.navy2
+        let colors = toolColors(for: title)
+        button.accentColor = colors.heavy
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.layer?.backgroundColor = ShelfStyle.whiteButton.cgColor
+        button.layer?.backgroundColor = colors.light.cgColor
 
         let titleLabel = label(title, size: 12, weight: .bold, color: ShelfStyle.buttonText)
         let subLabel = label(subtitle, size: 10, weight: .regular, color: NSColor(hex: 0x475569))
@@ -109,6 +137,21 @@ final class ToolShelfView: GlassPanelView {
             button.heightAnchor.constraint(equalToConstant: 54),
         ])
         return button
+    }
+
+    private func toolColors(for title: String) -> (light: NSColor, heavy: NSColor) {
+        switch title {
+        case "Asset":
+            return (ShelfStyle.assetLight, ShelfStyle.assetHeavy)
+        case "Text":
+            return (ShelfStyle.textLight, ShelfStyle.textHeavy)
+        case "Voice":
+            return (ShelfStyle.audioLight, ShelfStyle.audioHeavy)
+        case "Transition", "Effects":
+            return (ShelfStyle.videoLight, ShelfStyle.videoHeavy)
+        default:
+            return (ShelfStyle.genericLight, ShelfStyle.genericHeavy)
+        }
     }
 
     private func section(_ title: String, accent: NSColor, rows: [String]) -> NSView {
@@ -137,9 +180,22 @@ final class ToolShelfView: GlassPanelView {
         return panel
     }
 
+    private func actionRow(_ actions: [(String, Selector)], accent: NSColor) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        for action in actions {
+            let button = StyledButton(title: action.0, variant: .secondary, target: self, action: action.1)
+            button.contentTintColor = accent
+            row.addArrangedSubview(button)
+        }
+        return row
+    }
+
     private func assetRow(_ asset: MediaAsset) -> NSView {
         let row = AccentPanelView()
-        row.accentColor = NSColor(hex: 0x14b8a6)
+        row.accentColor = ShelfStyle.assetHeavy
         row.translatesAutoresizingMaskIntoConstraints = false
         let name = label(asset.originalFilename, size: 11, weight: .bold, color: ShelfStyle.heading)
         let meta = label("\(asset.type)  \(formatTime(asset.duration))", size: 10, weight: .regular, color: ShelfStyle.muted)
@@ -162,10 +218,32 @@ final class ToolShelfView: GlassPanelView {
     private func panelTitle(_ text: String) -> NSTextField {
         label(text, size: 15, weight: .bold, color: ShelfStyle.heading)
     }
+
+    @objc private func importLocal() {
+        onAction?(.importLocal)
+    }
+
+    @objc private func importURL() {
+        onAction?(.importURL)
+    }
+
+    @objc private func importProjectRender() {
+        onAction?(.importProjectRender)
+    }
+
+    @objc private func addText() {
+        onAction?(.addText)
+    }
+
+    @objc private func recognizeSelectedAudio() {
+        onAction?(.recognizeSelectedAudio)
+    }
 }
 
 @MainActor
 final class InspectorPanelView: GlassPanelView {
+    var onPropertyEdit: ((InspectorProperty, Double) -> Void)?
+
     private let stack = NSStackView()
     private let elementStack = NSStackView()
 
@@ -188,9 +266,13 @@ final class InspectorPanelView: GlassPanelView {
 
         guard let selection else {
             elementStack.addArrangedSubview(label("No selected element", size: 12, weight: .regular, color: ShelfStyle.muted))
-            for name in ["Speed", "Amplification", "Size", "Stretch", "Crop", "Border", "Pitch"] {
-                elementStack.addArrangedSubview(propertyRow(name, value: "--"))
-            }
+            elementStack.addArrangedSubview(propertyRow("Speed", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Amplification", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Size", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Stretch", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Crop", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Border", value: "--"))
+            elementStack.addArrangedSubview(propertyRow("Pitch", value: "--"))
             return
         }
 
@@ -199,9 +281,9 @@ final class InspectorPanelView: GlassPanelView {
         elementStack.addArrangedSubview(propertyRow("Type", value: selection.type.rawValue))
         elementStack.addArrangedSubview(propertyRow("Source", value: source))
         elementStack.addArrangedSubview(propertyRow("Timeline", value: "\(formatTime(selection.timelineStart)) - \(formatTime(selection.end))"))
-        elementStack.addArrangedSubview(propertyRow("Speed", value: String(format: "%.2fx", selection.speed ?? 1)))
-        elementStack.addArrangedSubview(propertyRow("Amplification", value: String(format: "%.0f%%", (selection.volume ?? 1) * 100)))
-        elementStack.addArrangedSubview(propertyRow("Size", value: String(format: "%.0f%%", (selection.transform?.scale ?? 1) * 100)))
+        elementStack.addArrangedSubview(editablePropertyRow("Speed", value: selection.speed ?? 1, suffix: "x", property: .speed))
+        elementStack.addArrangedSubview(editablePropertyRow("Amplification", value: (selection.volume ?? 1) * 100, suffix: "%", property: .amplification))
+        elementStack.addArrangedSubview(editablePropertyRow("Size", value: (selection.transform?.scale ?? 1) * 100, suffix: "%", property: .size))
         elementStack.addArrangedSubview(propertyRow("Stretch", value: "100%"))
         elementStack.addArrangedSubview(propertyRow("Crop", value: selection.crop == nil ? "None" : "Enabled"))
         elementStack.addArrangedSubview(propertyRow("Border", value: "0 px"))
@@ -258,6 +340,7 @@ final class InspectorPanelView: GlassPanelView {
     private func aiSection() -> NSView {
         let panel = AccentPanelView()
         panel.accentColor = ShelfStyle.exportHeavy
+        panel.layer?.backgroundColor = ShelfStyle.aiFallbackLight.cgColor
         panel.translatesAutoresizingMaskIntoConstraints = false
         let title = label("AI Assist", size: 13, weight: .bold, color: ShelfStyle.heading)
         let prompt = whiteChip("Ask for cuts, captions, fixes...")
@@ -300,6 +383,37 @@ final class InspectorPanelView: GlassPanelView {
         return row
     }
 
+    private func editablePropertyRow(_ name: String, value: Double, suffix: String, property: InspectorProperty) -> NSView {
+        let left = label(name, size: 11, weight: .bold, color: ShelfStyle.body)
+        let field = PropertyTextField(property: property, suffix: suffix)
+        field.stringValue = String(format: suffix == "x" ? "%.2f" : "%.0f", value)
+        field.target = self
+        field.action = #selector(propertyCommitted(_:))
+        field.wantsLayer = true
+        field.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
+        field.layer?.cornerRadius = 9
+        field.font = ShelfStyle.bold(size: 10)
+        field.textColor = ShelfStyle.buttonText
+        field.alignment = .center
+        field.isBordered = false
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: 76).isActive = true
+        field.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        let suffixLabel = label(suffix, size: 10, weight: .bold, color: ShelfStyle.muted)
+        let valueStack = NSStackView(views: [field, suffixLabel])
+        valueStack.orientation = .horizontal
+        valueStack.alignment = .centerY
+        valueStack.spacing = 4
+
+        let row = NSStackView(views: [left, valueStack])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        valueStack.setContentHuggingPriority(.required, for: .horizontal)
+        return row
+    }
+
     private func capsuleRow(_ values: [String]) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
@@ -313,7 +427,7 @@ final class InspectorPanelView: GlassPanelView {
     private func whiteChip(_ text: String) -> NSTextField {
         let chip = label(text, size: 10, weight: .bold, color: ShelfStyle.buttonText)
         chip.wantsLayer = true
-        chip.layer?.backgroundColor = ShelfStyle.whiteButton.cgColor
+        chip.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
         chip.layer?.cornerRadius = 9
         chip.alignment = .center
         return chip
@@ -339,5 +453,29 @@ final class InspectorPanelView: GlassPanelView {
             panel.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
         ])
         return panel
+    }
+
+    @objc private func propertyCommitted(_ sender: PropertyTextField) {
+        let trimmed = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed
+            .replacingOccurrences(of: "%", with: "")
+            .replacingOccurrences(of: "x", with: "")
+        guard let value = Double(normalized) else { return }
+        onPropertyEdit?(sender.property, value)
+    }
+}
+
+private final class PropertyTextField: NSTextField {
+    let property: InspectorProperty
+    let suffix: String
+
+    init(property: InspectorProperty, suffix: String) {
+        self.property = property
+        self.suffix = suffix
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }

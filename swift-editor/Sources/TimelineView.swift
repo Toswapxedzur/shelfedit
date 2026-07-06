@@ -306,7 +306,7 @@ final class TimelineView: NSView {
 
     private func drawPanelBase() {
         let path = NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12)
-        NSColor.white.withAlphaComponent(0.82).setFill()
+        ShelfStyle.childPanel.withAlphaComponent(0.96).setFill()
         path.fill()
         ShelfStyle.navy.withAlphaComponent(0.80).setFill()
         NSBezierPath(
