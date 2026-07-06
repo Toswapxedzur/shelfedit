@@ -119,8 +119,8 @@ final class ToolShelfView: GlassPanelView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.layer?.backgroundColor = colors.light.cgColor
 
-        let titleLabel = label(title, size: 12, weight: .bold, color: ShelfStyle.buttonText)
-        let subLabel = label(subtitle, size: 10, weight: .regular, color: NSColor(hex: 0x475569))
+        let titleLabel = label(title, size: 13, weight: .bold, color: ShelfStyle.buttonText)
+        let subLabel = label(subtitle, size: 11, weight: .regular, color: NSColor(hex: 0x475569))
         let stack = NSStackView(views: [titleLabel, subLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -164,9 +164,9 @@ final class ToolShelfView: GlassPanelView {
         stack.alignment = .leading
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(label(title, size: 13, weight: .bold, color: ShelfStyle.heading))
+        stack.addArrangedSubview(label(title, size: 14, weight: .bold, color: ShelfStyle.heading))
         for row in rows {
-            stack.addArrangedSubview(label(row, size: 11, weight: .regular, color: ShelfStyle.body))
+            stack.addArrangedSubview(label(row, size: 12, weight: .regular, color: ShelfStyle.body))
         }
         panel.addSubview(stack)
 
@@ -197,8 +197,8 @@ final class ToolShelfView: GlassPanelView {
         let row = AccentPanelView()
         row.accentColor = ShelfStyle.assetHeavy
         row.translatesAutoresizingMaskIntoConstraints = false
-        let name = label(asset.originalFilename, size: 11, weight: .bold, color: ShelfStyle.heading)
-        let meta = label("\(asset.type)  \(formatTime(asset.duration))", size: 10, weight: .regular, color: ShelfStyle.muted)
+        let name = label(asset.originalFilename, size: 12, weight: .bold, color: ShelfStyle.heading)
+        let meta = label("\(asset.type)  \(formatTime(asset.duration))", size: 11, weight: .regular, color: ShelfStyle.muted)
         let stack = NSStackView(views: [name, meta])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -216,7 +216,7 @@ final class ToolShelfView: GlassPanelView {
     }
 
     private func panelTitle(_ text: String) -> NSTextField {
-        label(text, size: 15, weight: .bold, color: ShelfStyle.heading)
+        label(text, size: 16, weight: .bold, color: ShelfStyle.heading)
     }
 
     @objc private func importLocal() {
@@ -265,7 +265,7 @@ final class InspectorPanelView: GlassPanelView {
         }
 
         guard let selection else {
-            elementStack.addArrangedSubview(label("No selected element", size: 12, weight: .regular, color: ShelfStyle.muted))
+            elementStack.addArrangedSubview(label("No selected element", size: 13, weight: .regular, color: ShelfStyle.muted))
             elementStack.addArrangedSubview(propertyRow("Speed", value: "--"))
             elementStack.addArrangedSubview(propertyRow("Amplification", value: "--"))
             elementStack.addArrangedSubview(propertyRow("Size", value: "--"))
@@ -297,7 +297,7 @@ final class InspectorPanelView: GlassPanelView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
-        stack.addArrangedSubview(label("Inspector", size: 15, weight: .bold, color: ShelfStyle.heading))
+        stack.addArrangedSubview(label("Inspector", size: 16, weight: .bold, color: ShelfStyle.heading))
         stack.addArrangedSubview(inspectorSection())
         stack.addArrangedSubview(aiSection())
 
@@ -313,7 +313,7 @@ final class InspectorPanelView: GlassPanelView {
         let panel = AccentPanelView()
         panel.accentColor = ShelfStyle.navy2
         panel.translatesAutoresizingMaskIntoConstraints = false
-        let title = label("Current Element Data", size: 13, weight: .bold, color: ShelfStyle.heading)
+        let title = label("Current Element Data", size: 14, weight: .bold, color: ShelfStyle.heading)
         let tabs = capsuleRow(["Basic", "Transform", "Audio", "Mask", "Color"])
 
         elementStack.orientation = .vertical
@@ -342,7 +342,7 @@ final class InspectorPanelView: GlassPanelView {
         panel.accentColor = ShelfStyle.exportHeavy
         panel.layer?.backgroundColor = ShelfStyle.aiFallbackLight.cgColor
         panel.translatesAutoresizingMaskIntoConstraints = false
-        let title = label("AI Assist", size: 13, weight: .bold, color: ShelfStyle.heading)
+        let title = label("AI Assist", size: 14, weight: .bold, color: ShelfStyle.heading)
         let prompt = whiteChip("Ask for cuts, captions, fixes...")
         let chips = capsuleRow(["Selected", "Visible range", "Transcript"])
         let proposals = NSStackView(views: [
@@ -372,7 +372,7 @@ final class InspectorPanelView: GlassPanelView {
     }
 
     private func propertyRow(_ name: String, value: String) -> NSView {
-        let left = label(name, size: 11, weight: .bold, color: ShelfStyle.body)
+        let left = label(name, size: 12, weight: .bold, color: ShelfStyle.body)
         let right = whiteChip(value)
         let row = NSStackView(views: [left, right])
         row.orientation = .horizontal
@@ -384,23 +384,23 @@ final class InspectorPanelView: GlassPanelView {
     }
 
     private func editablePropertyRow(_ name: String, value: Double, suffix: String, property: InspectorProperty) -> NSView {
-        let left = label(name, size: 11, weight: .bold, color: ShelfStyle.body)
+        let left = label(name, size: 12, weight: .bold, color: ShelfStyle.body)
         let field = PropertyTextField(property: property, suffix: suffix)
         field.stringValue = String(format: suffix == "x" ? "%.2f" : "%.0f", value)
         field.target = self
         field.action = #selector(propertyCommitted(_:))
         field.wantsLayer = true
         field.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
-        field.layer?.cornerRadius = 9
-        field.font = ShelfStyle.bold(size: 10)
+        field.layer?.cornerRadius = ShelfStyle.radiusControl
+        field.font = ShelfStyle.bold(size: 12)
         field.textColor = ShelfStyle.buttonText
         field.alignment = .center
         field.isBordered = false
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: 76).isActive = true
-        field.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 84).isActive = true
+        field.heightAnchor.constraint(equalToConstant: ShelfStyle.controlHeight).isActive = true
 
-        let suffixLabel = label(suffix, size: 10, weight: .bold, color: ShelfStyle.muted)
+        let suffixLabel = label(suffix, size: 11, weight: .bold, color: ShelfStyle.muted)
         let valueStack = NSStackView(views: [field, suffixLabel])
         valueStack.orientation = .horizontal
         valueStack.alignment = .centerY
@@ -425,11 +425,13 @@ final class InspectorPanelView: GlassPanelView {
     }
 
     private func whiteChip(_ text: String) -> NSTextField {
-        let chip = label(text, size: 10, weight: .bold, color: ShelfStyle.buttonText)
+        let chip = label(text, size: 11, weight: .bold, color: ShelfStyle.buttonText)
         chip.wantsLayer = true
         chip.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
-        chip.layer?.cornerRadius = 9
+        chip.layer?.cornerRadius = 12
         chip.alignment = .center
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        chip.heightAnchor.constraint(equalToConstant: 24).isActive = true
         return chip
     }
 
@@ -437,8 +439,8 @@ final class InspectorPanelView: GlassPanelView {
         let panel = AccentPanelView()
         panel.accentColor = ShelfStyle.exportHeavy
         panel.layer?.backgroundColor = ShelfStyle.aiLight.cgColor
-        let titleLabel = label(title, size: 11, weight: .bold, color: ShelfStyle.heading)
-        let bodyLabel = label(body, size: 10, weight: .regular, color: ShelfStyle.muted)
+        let titleLabel = label(title, size: 12, weight: .bold, color: ShelfStyle.heading)
+        let bodyLabel = label(body, size: 11, weight: .regular, color: ShelfStyle.muted)
         let stack = NSStackView(views: [titleLabel, bodyLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
