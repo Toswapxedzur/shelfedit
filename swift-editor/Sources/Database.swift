@@ -29,7 +29,17 @@ final class ShelfDatabase {
             let sql = """
             SELECT p.id, p.name, p.updated_at,
                    (SELECT COUNT(*) FROM media_assets m
-                    WHERE m.project_id = p.id AND m.type != 'export') AS media_count
+                    WHERE m.project_id = p.id AND m.type != 'export') AS media_count,
+                   COALESCE(
+                    (SELECT NULLIF(m.thumbnail_path, '') FROM media_assets m
+                     WHERE m.project_id = p.id AND m.type != 'export' AND NULLIF(m.thumbnail_path, '') IS NOT NULL
+                     ORDER BY m.created_at ASC LIMIT 1),
+                    (SELECT NULLIF(m.local_path, '') FROM media_assets m
+                     WHERE m.project_id = p.id AND m.type != 'export'
+                     ORDER BY m.created_at ASC LIMIT 1)
+                   ) AS thumbnail_path,
+                   COALESCE((SELECT SUM(m.duration_seconds) FROM media_assets m
+                    WHERE m.project_id = p.id AND m.type != 'export'), 0) AS duration
             FROM projects p
             WHERE p.deleted_at IS NULL
             ORDER BY p.updated_at DESC
@@ -39,7 +49,9 @@ final class ShelfDatabase {
                     id: text(stmt, 0),
                     name: text(stmt, 1),
                     updatedAt: text(stmt, 2),
-                    mediaCount: Int(sqlite3_column_int(stmt, 3))
+                    mediaCount: Int(sqlite3_column_int(stmt, 3)),
+                    thumbnailPath: text(stmt, 4).isEmpty ? nil : text(stmt, 4),
+                    duration: sqlite3_column_double(stmt, 5)
                 )
             }
         }
@@ -56,7 +68,7 @@ final class ShelfDatabase {
                 db,
                 sql: """
                 SELECT id, project_id, type, original_filename, local_path,
-                       duration_seconds, width, height
+                       duration_seconds, width, height, thumbnail_path
                 FROM media_assets
                 WHERE project_id = ? AND type != 'export'
                 """,
@@ -70,7 +82,8 @@ final class ShelfDatabase {
                     localPath: text(stmt, 4),
                     duration: sqlite3_column_double(stmt, 5),
                     width: Int(sqlite3_column_int(stmt, 6)),
-                    height: Int(sqlite3_column_int(stmt, 7))
+                    height: Int(sqlite3_column_int(stmt, 7)),
+                    thumbnailPath: text(stmt, 8).isEmpty ? nil : text(stmt, 8)
                 )
             }
             let media = Dictionary(uniqueKeysWithValues: mediaRows.map { ($0.id, $0) })

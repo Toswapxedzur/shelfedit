@@ -17,6 +17,8 @@ struct ProjectSummary {
     let name: String
     let updatedAt: String
     let mediaCount: Int
+    let thumbnailPath: String?
+    let duration: Double
 }
 
 struct MediaAsset {
@@ -28,6 +30,7 @@ struct MediaAsset {
     let duration: Double
     let width: Int
     let height: Int
+    let thumbnailPath: String?
 }
 
 struct CanvasSpec: Codable {

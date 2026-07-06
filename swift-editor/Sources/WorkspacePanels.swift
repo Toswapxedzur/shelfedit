@@ -7,7 +7,7 @@ final class ToolShelfView: GlassPanelView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        fillColor = NSColor(hex: 0x202020, alpha: 0.94)
+        fillColor = .white
         build()
     }
 
@@ -28,7 +28,7 @@ final class ToolShelfView: GlassPanelView {
     private func build() {
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 14
+        content.spacing = 9
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
@@ -48,12 +48,12 @@ final class ToolShelfView: GlassPanelView {
             "Import from other project",
             "Use final video without render",
         ]))
-        content.addArrangedSubview(section("Text", accent: NSColor(hex: 0xdb2777), rows: [
+        content.addArrangedSubview(section("Text", accent: ShelfStyle.textHeavy, rows: [
             "Add text",
             "Caption track",
             "Style preset",
         ]))
-        content.addArrangedSubview(section("Voice Recognition", accent: NSColor(hex: 0x22c55e), rows: [
+        content.addArrangedSubview(section("Voice Recognition", accent: ShelfStyle.audioHeavy, rows: [
             "Audio selection -> text",
             "Target caption track",
             "Transcript language",
@@ -171,7 +171,7 @@ final class InspectorPanelView: GlassPanelView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        fillColor = NSColor(hex: 0x202020, alpha: 0.94)
+        fillColor = .white
         build()
         update(selection: nil, media: [:])
     }
@@ -211,7 +211,7 @@ final class InspectorPanelView: GlassPanelView {
     private func build() {
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = 9
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
@@ -257,7 +257,7 @@ final class InspectorPanelView: GlassPanelView {
 
     private func aiSection() -> NSView {
         let panel = AccentPanelView()
-        panel.accentColor = NSColor(hex: 0xef4444)
+        panel.accentColor = ShelfStyle.exportHeavy
         panel.translatesAutoresizingMaskIntoConstraints = false
         let title = label("AI Assist", size: 13, weight: .bold, color: ShelfStyle.heading)
         let prompt = whiteChip("Ask for cuts, captions, fixes...")
@@ -321,8 +321,8 @@ final class InspectorPanelView: GlassPanelView {
 
     private func proposal(_ title: String, _ body: String) -> NSView {
         let panel = AccentPanelView()
-        panel.accentColor = NSColor(hex: 0xf43f5e)
-        panel.layer?.backgroundColor = NSColor(hex: 0x2b171a, alpha: 0.95).cgColor
+        panel.accentColor = ShelfStyle.exportHeavy
+        panel.layer?.backgroundColor = ShelfStyle.aiLight.cgColor
         let titleLabel = label(title, size: 11, weight: .bold, color: ShelfStyle.heading)
         let bodyLabel = label(body, size: 10, weight: .regular, color: ShelfStyle.muted)
         let stack = NSStackView(views: [titleLabel, bodyLabel])

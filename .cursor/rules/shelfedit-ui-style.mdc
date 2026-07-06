@@ -3,11 +3,11 @@ description: ShelfEdit visual design system and custom UI direction for all futu
 alwaysApply: true
 ---
 
-# ShelfEdit UI Style — custom, soft, dashboard-like
+# ShelfEdit UI Style — soft precision
 
 Use this visual language for future ShelfEdit web, desktop, extension, and tool
-interfaces. The target feel is light, clean, rounded, low-contrast, and
-productivity-dashboard polished.
+interfaces. The target feel is soft precision: calm, rounded, compact,
+engineered, and trustworthy.
 
 ## Core Direction
 
@@ -20,14 +20,42 @@ productivity-dashboard polished.
 - Do not use WebView or HTML to transport decoded video frames. Web/native/custom
   UI choices must not break the zero-copy or near-zero-copy media path.
 - Use Arial, Helvetica, sans-serif everywhere.
+- Default canvas/background is grey or dark grey. Individual boxes/cards are
+  white unless the screen explicitly needs a black/dark media surface.
+- No thin borders anywhere. Use soft shadows, inset shadows, fills, and spacing
+  instead of 1px outline borders.
+- Every component that floats above another surface needs a shadow.
+- Spacing between sibling boxes should be compact: about 1.5x tighter than the
+  previous loose dashboard spacing. Prefer 8-16px gaps, not 24-32px gaps.
+- Sub-boxes should include a middle/inner strip or visual separator when useful
+  for scanning. The strip should be soft and adjustable, not a hard border.
+- Only secondary-or-deeper boxes may own a left color rim/accent stripe. The rim
+  is optional. Bigger/primary boxes may have no rim.
+- Avoid similar color stacks such as grey-white-blue-white nested together. Each
+  colored surface must have clear contrast against its parent.
+
+## Soft Precision Scale
+
+- Small controls: 8-10px radius.
+- Normal buttons / inputs: 10-12px radius.
+- Cards / panels: 12-16px radius.
+- Large modal panels: 16-20px radius.
+- Pills / chips / nav tabs: 999px radius.
+- Buttons: 30-40px high, 12-18px horizontal padding, 12-14px text, 700 weight.
+- Inputs: 36-44px high, embedded feel via inset shadow, no hard border.
+- Shadows:
+  - tiny elevation: `0 2px 6px rgba(15,23,42,0.06)`
+  - normal card: `0 8px 24px rgba(15,23,42,0.08)`
+  - hover card: `0 12px 28px rgba(15,23,42,0.12)`
+  - floating panel/modal: `0 18px 44px rgba(15,23,42,0.22)`
 
 ## Website UI
 
 - Page background: gradient from `#f8fafc` into pale indigo `#eef2ff`, plus a
   soft dot grid using `#94a3b8` at 35% opacity.
 - Top bar: fixed 52px height, translucent white `rgba(255,255,255,0.88)`,
-  `backdrop-filter: blur(10px)`, bottom border `rgba(148,163,184,0.25)`.
-  It should feel like frosted glass.
+  `backdrop-filter: blur(10px)`, and soft shadow separation. It should feel
+  like frosted glass without a hard border.
 - Cards: white `#ffffff`, `border-radius: 16px`, shadow
   `0 12px 34px rgba(15,23,42,0.08)`.
 - Hover cards: lift upward 2px and use shadow
@@ -45,8 +73,8 @@ productivity-dashboard polished.
   `0 1px 2px rgba(3,16,31,0.25)`.
 - Nav buttons: pill links, `border-radius: 999px`, `font-size: 13px`,
   `font-weight: 600`, muted text `#64748b`.
-- Active nav: text `#1e3a8a`, background `rgba(28,92,168,0.10)`, border
-  `rgba(28,92,168,0.18)`.
+- Active nav: text `#1e3a8a`, background `rgba(28,92,168,0.10)`, shadow or
+  color fill for emphasis.
 - Language select: compact rounded rectangle, background `#e2e8f0`, no border,
   `border-radius: 10px`, `font-size: 12px`, bold.
 
@@ -61,7 +89,45 @@ productivity-dashboard polished.
 - Tag pills: uppercase, `font-size: 10px`, `font-weight: 700`,
   `letter-spacing: 0.04em`, `border-radius: 999px`, `padding: 3px 8px`.
 
-## Semantic Tag Colors
+## Fixed Semantic Colors
+
+Use these precise light/heavy pairs. Colored backgrounds use the heavier variant
+when contrast matters.
+
+- Assets:
+  - light: `#e0f2fe`
+  - heavy: `#0284c7`
+- Video:
+  - light: `#dbeafe`
+  - heavy: `#1d4ed8`
+- Audio:
+  - light: `#fce7f3`
+  - heavy: `#be185d`
+- Text:
+  - light: `#ecfeff`
+  - heavy: `#0891b2`
+- Export:
+  - light: `#fef3c7`
+  - heavy: `#b45309`
+- AI:
+  - default: `#ffffff`
+  - fallback when white conflicts with the background: use export gold
+    `#fef3c7` / `#b45309`
+- Generic buttons:
+  - light: `#f1f5f9`
+  - heavy: `#64748b`
+- Danger:
+  - light: `#fee2e2`
+  - heavy: `#b91c1c`
+- Neutral surfaces:
+  - canvas grey: `#e5e7eb`
+  - box white: `#ffffff`
+  - dark media surface: `#111827`
+
+If a feature is not covered by this map, do not invent a color silently. Ask the
+user or use neutral/generic grey until a precise color is assigned.
+
+## Legacy Semantic Tag Colors
 
 - Home/platform: background `#eef2ff`, text `#1e3a8a`.
 - Feature/free/custom: background `#fffbeb`, text `#854d0e`.
@@ -76,8 +142,8 @@ productivity-dashboard polished.
   `box-shadow: inset 0 0 0 1px rgba(148,163,184,0.45)`, `border-radius: 10px`.
 - Input focus: `0 0 0 3px rgba(30,58,138,0.18)` plus navy inset outline.
 - Focus arrows: perfect circles, 42px by 42px, white
-  `rgba(255,255,255,0.96)`, navy arrow `#1c5ca8`, border
-  `rgba(28,92,168,0.35)`, shadow `0 4px 14px rgba(3,16,31,0.22)`.
+  `rgba(255,255,255,0.96)`, navy arrow `#1c5ca8`, shadow
+  `0 4px 14px rgba(3,16,31,0.22)`.
   Hover scales to 1.12.
 - Popup feedback overlay: local to each card. Soft dim `rgba(15,23,42,0.05)`,
   message card white, `border-radius: 12px`, shadow
