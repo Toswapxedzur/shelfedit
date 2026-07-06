@@ -63,11 +63,11 @@ final class HomeView: NSView {
         panel.addSubview(leftRail)
 
         leftRail.addArrangedSubview(accountCard())
-        leftRail.addArrangedSubview(navButton("Home", color: ShelfStyle.videoHeavy))
-        leftRail.addArrangedSubview(navButton("Projects", color: ShelfStyle.assetHeavy))
-        leftRail.addArrangedSubview(navButton("Settings", color: ShelfStyle.genericHeavy))
-        leftRail.addArrangedSubview(navButton("Exports", color: ShelfStyle.exportHeavy))
-        leftRail.addArrangedSubview(navButton("Danger Zone", color: ShelfStyle.dangerHeavy))
+        leftRail.addArrangedSubview(navButton("Home", color: ShelfStyle.videoHeavy, fill: ShelfStyle.videoLight))
+        leftRail.addArrangedSubview(navButton("Projects", color: ShelfStyle.assetHeavy, fill: ShelfStyle.assetLight))
+        leftRail.addArrangedSubview(navButton("Settings", color: ShelfStyle.genericHeavy, fill: ShelfStyle.genericLight))
+        leftRail.addArrangedSubview(navButton("Exports", color: ShelfStyle.exportHeavy, fill: ShelfStyle.exportLight))
+        leftRail.addArrangedSubview(navButton("Danger Zone", color: ShelfStyle.dangerHeavy, fill: ShelfStyle.dangerLight))
         leftRail.addArrangedSubview(NSView())
         leftRail.addArrangedSubview(infoCard())
 
@@ -104,9 +104,9 @@ final class HomeView: NSView {
         return panel
     }
 
-    private func navButton(_ title: String, color: NSColor) -> NSView {
+    private func navButton(_ title: String, color: NSColor, fill: NSColor) -> NSView {
         let panel = GlassPanelView()
-        panel.fillColor = .white
+        panel.fillColor = fill
         panel.cornerRadius = 14
         panel.translatesAutoresizingMaskIntoConstraints = false
         let strip = NSView()
@@ -259,7 +259,7 @@ private final class ProjectTileView: GlassPanelView {
     init(project: ProjectSummary) {
         self.project = project
         super.init(frame: .zero)
-        fillColor = .white
+        fillColor = ShelfStyle.childPanel
         build()
     }
 

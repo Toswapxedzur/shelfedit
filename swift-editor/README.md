@@ -26,8 +26,8 @@ Current slice:
   project grid.
 - Existing project picker from `~/.local_ai_video_editor/shelfedit.db`.
 - AVFoundation composition playback across timeline clips.
-- Custom ShelfEdit UI chrome using grey canvas, white floating boxes, semantic
-  color accents, compact spacing, and shadow-only separation.
+- Custom ShelfEdit UI chrome using dark grey canvas, white top-level boxes,
+  off-white/semantic child boxes, compact spacing, and shadow-only separation.
 - Editor workspace shell with left tools/assets, center preview, right inspector
   plus AI assist, and full-width timeline.
 - Metal-backed preview surface fed by CoreVideo pixel buffers.
@@ -40,6 +40,6 @@ Next slices expand the Metal surface from single-composition presentation into a
 full multi-track compositor with transforms, opacity, text overlays, masks,
 chroma/color effects, native export, and AI integration.
 
-See `LAYOUT_PLAN.md` for the planned dark editor workspace layout, including the
-left library/tools panel, center Metal preview, blue selected-element inspector,
-red AI assist panel, and bottom timeline.
+See `LAYOUT_PLAN.md` for the planned editor workspace layout, including the left
+library/tools panel, center Metal preview, blue selected-element inspector,
+white/gold AI assist panel, and bottom timeline.
