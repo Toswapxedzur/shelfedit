@@ -11,6 +11,8 @@ enum ShelfStyle {
     static let space4: CGFloat = 16
     static let controlHeight: CGFloat = 32
     static let mainControlHeight: CGFloat = 36
+    static let toolbarHeight: CGFloat = 52
+    static let chipHeight: CGFloat = 24
     static let heading = NSColor(hex: 0x111827)
     static let text = NSColor(hex: 0x1f2937)
     static let body = NSColor(hex: 0x475569)
@@ -56,6 +58,27 @@ enum ShelfStyle {
 
     static func bold(size: CGFloat) -> NSFont {
         font(size: size, weight: .bold)
+    }
+
+    static func applyCardShadow(to layer: CALayer?) {
+        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
+        layer?.shadowOpacity = 0.08
+        layer?.shadowRadius = 12
+        layer?.shadowOffset = CGSize(width: 0, height: -6)
+    }
+
+    static func applyFloatingShadow(to layer: CALayer?) {
+        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
+        layer?.shadowOpacity = 0.22
+        layer?.shadowRadius = 22
+        layer?.shadowOffset = CGSize(width: 0, height: -10)
+    }
+
+    static func applyTinyShadow(to layer: CALayer?) {
+        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
+        layer?.shadowOpacity = 0.06
+        layer?.shadowRadius = 6
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
     }
 }
 
@@ -111,10 +134,7 @@ class GlassPanelView: NSView {
         wantsLayer = true
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = false
-        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.22
-        layer?.shadowRadius = 18
-        layer?.shadowOffset = CGSize(width: 0, height: -10)
+        ShelfStyle.applyFloatingShadow(to: layer)
     }
 
     required init?(coder: NSCoder) {
@@ -141,10 +161,7 @@ final class FrostedTopBarView: NSVisualEffectView {
         state = .active
         wantsLayer = true
         layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
-        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.08
-        layer?.shadowRadius = 10
-        layer?.shadowOffset = CGSize(width: 0, height: -3)
+        ShelfStyle.applyCardShadow(to: layer)
     }
 
     required init?(coder: NSCoder) {
@@ -174,7 +191,8 @@ final class StyledButton: NSButton {
         wantsLayer = true
         setButtonType(.momentaryPushIn)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: variant == .pill ? 30 : ShelfStyle.controlHeight).isActive = true
+        let height = variant == .primary ? ShelfStyle.mainControlHeight : (variant == .pill ? 30 : ShelfStyle.controlHeight)
+        heightAnchor.constraint(equalToConstant: height).isActive = true
     }
 
     required init?(coder: NSCoder) {
@@ -191,22 +209,19 @@ final class StyledButton: NSButton {
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
             contentTintColor = ShelfStyle.navy.withAlphaComponent(disabledAlpha)
             layer?.shadowColor = ShelfStyle.navy.cgColor
-            layer?.shadowOpacity = 0.18
-            layer?.shadowRadius = 6
-            layer?.shadowOffset = CGSize(width: 0, height: -2)
+            layer?.shadowOpacity = 0.16
+            layer?.shadowRadius = 10
+            layer?.shadowOffset = CGSize(width: 0, height: -4)
         case .secondary:
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
             contentTintColor = ShelfStyle.buttonText.withAlphaComponent(disabledAlpha)
-            layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-            layer?.shadowOpacity = 0.08
-            layer?.shadowRadius = 6
-            layer?.shadowOffset = CGSize(width: 0, height: -2)
+            ShelfStyle.applyTinyShadow(to: layer)
         case .pill:
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
             layer?.shadowColor = ShelfStyle.navy2.cgColor
-            layer?.shadowOpacity = isEnabled ? 0.18 : 0
-            layer?.shadowRadius = 6
-            layer?.shadowOffset = CGSize(width: 0, height: -2)
+            layer?.shadowOpacity = isEnabled ? 0.12 : 0
+            layer?.shadowRadius = 8
+            layer?.shadowOffset = CGSize(width: 0, height: -3)
             contentTintColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha)
         }
     }
@@ -225,10 +240,7 @@ final class StyledPopupButton: NSPopUpButton {
         wantsLayer = true
         layer?.backgroundColor = ShelfStyle.whiteButton.cgColor
         layer?.cornerRadius = ShelfStyle.radiusControl
-        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.08
-        layer?.shadowRadius = 6
-        layer?.shadowOffset = CGSize(width: 0, height: -2)
+        ShelfStyle.applyTinyShadow(to: layer)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: ShelfStyle.controlHeight).isActive = true
     }
@@ -246,10 +258,7 @@ final class AccentPanelView: NSView {
         wantsLayer = true
         layer?.cornerRadius = ShelfStyle.radiusCard
         layer?.backgroundColor = ShelfStyle.childPanel.cgColor
-        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.08
-        layer?.shadowRadius = 12
-        layer?.shadowOffset = CGSize(width: 0, height: -3)
+        ShelfStyle.applyCardShadow(to: layer)
     }
 
     required init?(coder: NSCoder) {
