@@ -96,8 +96,9 @@ final class TimelineView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        NSColor.windowBackgroundColor.setFill()
+        NSColor.clear.setFill()
         bounds.fill()
+        drawPanelBase()
         drawRuler()
         drawTracks()
         drawPlayhead()
@@ -158,12 +159,12 @@ final class TimelineView: NSView {
 
     private func drawRuler() {
         let rect = NSRect(x: 0, y: bounds.height - rulerHeight, width: bounds.width, height: rulerHeight)
-        NSColor.controlBackgroundColor.setFill()
+        NSColor.white.withAlphaComponent(0.58).setFill()
         rect.fill()
 
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .font: ShelfStyle.font(size: 10, weight: .semibold),
+            .foregroundColor: ShelfStyle.body,
         ]
         ("ShelfEdit Native" as NSString).draw(at: NSPoint(x: 12, y: rect.minY + 8), withAttributes: attrs)
 
@@ -179,14 +180,14 @@ final class TimelineView: NSView {
                 path.move(to: NSPoint(x: x, y: rect.minY))
                 path.line(to: NSPoint(x: x, y: rect.maxY))
                 path.lineWidth = 1
-                NSColor.separatorColor.setStroke()
+                NSColor(hex: 0x94a3b8, alpha: 0.24).setStroke()
                 path.stroke()
                 (formatTime(t) as NSString).draw(at: NSPoint(x: x + 4, y: rect.minY + 8), withAttributes: attrs)
             }
             t += step
         }
 
-        NSColor.separatorColor.setStroke()
+        NSColor(hex: 0x94a3b8, alpha: 0.25).setStroke()
         let bottom = NSBezierPath()
         bottom.move(to: NSPoint(x: 0, y: rect.minY))
         bottom.line(to: NSPoint(x: bounds.width, y: rect.minY))
@@ -198,14 +199,14 @@ final class TimelineView: NSView {
         for (displayIndex, track) in sortedTracks.enumerated() {
             let row = rowRect(displayIndex: displayIndex)
             let background = displayIndex.isMultiple(of: 2)
-                ? NSColor(calibratedWhite: 0.105, alpha: 1)
-                : NSColor(calibratedWhite: 0.13, alpha: 1)
+                ? NSColor.white.withAlphaComponent(0.50)
+                : ShelfStyle.indigoSoft.withAlphaComponent(0.45)
             background.setFill()
             row.fill()
 
             let labelAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: track.hidden == true ? NSColor.tertiaryLabelColor : NSColor.secondaryLabelColor,
+                .font: ShelfStyle.bold(size: 11),
+                .foregroundColor: track.hidden == true ? ShelfStyle.muted : ShelfStyle.body,
             ]
             (track.name as NSString).draw(
                 in: NSRect(x: 12, y: row.midY - 8, width: leftGutter - 20, height: 18),
@@ -216,7 +217,7 @@ final class TimelineView: NSView {
                 drawClip(clip, in: row, trackHidden: track.hidden ?? false)
             }
 
-            NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
+            NSColor(hex: 0x94a3b8, alpha: 0.18).setStroke()
             let line = NSBezierPath()
             line.move(to: NSPoint(x: 0, y: row.minY))
             line.line(to: NSPoint(x: bounds.width, y: row.minY))
@@ -237,25 +238,25 @@ final class TimelineView: NSView {
             width: visibleMax - visibleMin,
             height: max(18, row.height - clipInset * 2)
         )
-        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
         fillColor(for: clip, hidden: trackHidden).setFill()
         path.fill()
 
         let selected = clip.id == selectedElementId
-        (selected ? NSColor.systemYellow : NSColor.black.withAlphaComponent(0.35)).setStroke()
-        path.lineWidth = selected ? 2 : 1
+        (selected ? ShelfStyle.navy : NSColor.white.withAlphaComponent(0.85)).setStroke()
+        path.lineWidth = selected ? 2.5 : 1
         path.stroke()
 
-        let edgeColor = NSColor.white.withAlphaComponent(selected ? 0.65 : 0.25)
+        let edgeColor = ShelfStyle.navy.withAlphaComponent(selected ? 0.65 : 0.25)
         edgeColor.setFill()
-        NSRect(x: rect.minX + 4, y: rect.minY + 4, width: 2, height: rect.height - 8).fill()
-        NSRect(x: rect.maxX - 6, y: rect.minY + 4, width: 2, height: rect.height - 8).fill()
+        NSBezierPath(roundedRect: NSRect(x: rect.minX + 6, y: rect.minY + 7, width: 3, height: rect.height - 14), xRadius: 1.5, yRadius: 1.5).fill()
+        NSBezierPath(roundedRect: NSRect(x: rect.maxX - 9, y: rect.minY + 7, width: 3, height: rect.height - 14), xRadius: 1.5, yRadius: 1.5).fill()
 
         let title = clip.text ?? clip.mediaId?.shortStableId ?? clip.id.shortStableId
         let label = "\(clip.type.rawValue)  \(title)" as NSString
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white,
+            .font: ShelfStyle.bold(size: 11),
+            .foregroundColor: ShelfStyle.heading,
         ]
         label.draw(
             in: rect.insetBy(dx: 10, dy: max(4, (rect.height - 16) / 2)),
@@ -270,8 +271,11 @@ final class TimelineView: NSView {
         path.move(to: NSPoint(x: x, y: 0))
         path.line(to: NSPoint(x: x, y: bounds.height))
         path.lineWidth = dragState?.kind == .scrub ? 3 : 2
-        NSColor.systemRed.setStroke()
+        ShelfStyle.navy2.setStroke()
         path.stroke()
+
+        ShelfStyle.navy2.setFill()
+        NSBezierPath(ovalIn: NSRect(x: x - 5, y: bounds.height - rulerHeight - 5, width: 10, height: 10)).fill()
     }
 
     private func drawViewportText() {
@@ -283,7 +287,7 @@ final class TimelineView: NSView {
         ) as NSString
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
-            .foregroundColor: NSColor.tertiaryLabelColor,
+            .foregroundColor: ShelfStyle.muted,
         ]
         text.draw(at: NSPoint(x: leftGutter, y: 8), withAttributes: attrs)
     }
@@ -292,12 +296,24 @@ final class TimelineView: NSView {
         let alpha: CGFloat = hidden ? 0.35 : 0.92
         switch clip.type {
         case .video:
-            return NSColor.systemBlue.withAlphaComponent(alpha)
+            return ShelfStyle.indigoSoft.withAlphaComponent(alpha)
         case .audio:
-            return NSColor.systemGreen.withAlphaComponent(alpha)
+            return ShelfStyle.cyanSoft.withAlphaComponent(alpha)
         case .text:
-            return NSColor.systemPurple.withAlphaComponent(alpha)
+            return ShelfStyle.pinkSoft.withAlphaComponent(alpha)
         }
+    }
+
+    private func drawPanelBase() {
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12)
+        NSColor.white.withAlphaComponent(0.40).setFill()
+        path.fill()
+        ShelfStyle.navy.withAlphaComponent(0.80).setFill()
+        NSBezierPath(
+            roundedRect: NSRect(x: 0, y: 0, width: 4, height: bounds.height),
+            xRadius: 2,
+            yRadius: 2
+        ).fill()
     }
 
     private func rowRect(displayIndex: Int) -> NSRect {
