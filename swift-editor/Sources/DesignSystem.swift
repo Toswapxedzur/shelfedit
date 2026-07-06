@@ -11,7 +11,6 @@ enum ShelfStyle {
     static let space4: CGFloat = 16
     static let controlHeight: CGFloat = 32
     static let mainControlHeight: CGFloat = 36
-    static let toolbarHeight: CGFloat = 52
     static let chipHeight: CGFloat = 24
     static let heading = NSColor(hex: 0x111827)
     static let text = NSColor(hex: 0x1f2937)
@@ -153,22 +152,6 @@ class GlassPanelView: NSView {
     }
 }
 
-final class FrostedTopBarView: NSVisualEffectView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        material = .popover
-        blendingMode = .withinWindow
-        state = .active
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
-        ShelfStyle.applyCardShadow(to: layer)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
 final class StyledButton: NSButton {
     enum Variant {
         case primary
@@ -177,6 +160,15 @@ final class StyledButton: NSButton {
     }
 
     private let variant: Variant
+    var isActiveStyle = false {
+        didSet { needsDisplay = true }
+    }
+    var activeFillColor = ShelfStyle.videoLight {
+        didSet { needsDisplay = true }
+    }
+    var activeTintColor = ShelfStyle.videoHeavy {
+        didSet { needsDisplay = true }
+    }
 
     init(title: String, variant: Variant = .secondary, target: AnyObject?, action: Selector?) {
         self.variant = variant
@@ -204,6 +196,15 @@ final class StyledButton: NSButton {
         let disabledAlpha: CGFloat = isEnabled ? 1 : 0.45
         layer?.cornerRadius = variant == .pill ? 15 : ShelfStyle.radiusControl
         layer?.masksToBounds = false
+        if isActiveStyle {
+            layer?.backgroundColor = activeFillColor.withAlphaComponent(disabledAlpha).cgColor
+            contentTintColor = activeTintColor.withAlphaComponent(disabledAlpha)
+            layer?.shadowColor = activeTintColor.cgColor
+            layer?.shadowOpacity = isEnabled ? 0.16 : 0
+            layer?.shadowRadius = 10
+            layer?.shadowOffset = CGSize(width: 0, height: -4)
+            return
+        }
         switch variant {
         case .primary:
             layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor

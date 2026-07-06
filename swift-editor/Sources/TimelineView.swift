@@ -7,6 +7,11 @@ enum TimelineDragKind {
     case scrub
 }
 
+enum TimelineTool {
+    case select
+    case blade
+}
+
 final class TimelineView: NSView {
     var timeline = TimelineData.empty() {
         didSet {
@@ -27,6 +32,9 @@ final class TimelineView: NSView {
     var selectedElementId: String? {
         didSet { needsDisplay = true }
     }
+    var activeTool: TimelineTool = .select {
+        didSet { needsDisplay = true }
+    }
     var visibleStart: Double = 0 {
         didSet { needsDisplay = true }
     }
@@ -36,6 +44,7 @@ final class TimelineView: NSView {
 
     var onScrub: ((Double, Bool) -> Void)?
     var onSelect: ((String?) -> Void)?
+    var onBlade: ((String, Double) -> Void)?
     var onClipDrag: ((String, TimelineDragKind, Double, Bool) -> Void)?
     var onViewportChanged: (() -> Void)?
 
@@ -113,6 +122,13 @@ final class TimelineView: NSView {
         if let hit = hitTestClip(at: point) {
             selectedElementId = hit.element.id
             onSelect?(hit.element.id)
+            if activeTool == .blade {
+                setCurrentTime(time, follow: false)
+                onScrub?(time, false)
+                onBlade?(hit.element.id, time)
+                dragState = nil
+                return
+            }
             dragState = DragState(kind: hit.kind, elementId: hit.element.id, startTime: time)
         } else {
             selectedElementId = nil
