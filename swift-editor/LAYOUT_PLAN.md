@@ -39,11 +39,10 @@ Home / Dashboard
   -> open project
 
 Editor Workspace
-  Top app bar
   Left library/tools panel
   Center preview/player panel
   Right inspector + AI assist panel
-  Bottom timeline panel
+  Bottom timeline panel with local track-tool strip
 ```
 
 ## Home Page
@@ -68,14 +67,11 @@ The Home page should be a real app entry point, not just a project picker.
 
 ## Editor Workspace Layout
 
-### Top Bar
+### Global Top Bar
 
-Fixed-height dark frosted bar.
-
-- Left: Home, project name, save status.
-- Center: timecode/date/title area.
-- Right: native pipeline status, share/export, settings.
-- Keep controls compact and pill-like.
+There is no global editor top bar. Project chrome should not steal vertical
+space from the video editor. Timeline commands, playback state, and edit status
+belong in local tool strips near the surface they control.
 
 ### Left Panel: Library And Tools
 
@@ -222,7 +218,7 @@ Recommended height: 260-360px.
 Structure:
 
 - Top toolbar:
-  - select/split/delete/duplicate/ripple
+  - select/blade/split/delete/duplicate/ripple
   - snapping
   - zoom controls
   - link/unlink
