@@ -185,7 +185,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             topBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             topBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             topBar.topAnchor.constraint(equalTo: content.topAnchor),
-            topBar.heightAnchor.constraint(equalToConstant: 52),
+            topBar.heightAnchor.constraint(equalToConstant: ShelfStyle.toolbarHeight),
 
             toolbar.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),

@@ -245,10 +245,10 @@ private final class HomeRightPanel: GlassPanelView {
         let field = label(text, size: 11, weight: .bold, color: color)
         field.wantsLayer = true
         field.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
-        field.layer?.cornerRadius = 12
+        field.layer?.cornerRadius = ShelfStyle.chipHeight / 2
         field.alignment = .center
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        field.heightAnchor.constraint(equalToConstant: ShelfStyle.chipHeight).isActive = true
         field.widthAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
         return field
     }
@@ -385,10 +385,10 @@ func pillLabel(_ text: String, background: NSColor, foreground: NSColor) -> NSTe
     let field = label(text, size: 11, weight: .bold, color: foreground)
     field.wantsLayer = true
     field.layer?.backgroundColor = background.withAlphaComponent(0.9).cgColor
-    field.layer?.cornerRadius = 12
+    field.layer?.cornerRadius = ShelfStyle.chipHeight / 2
     field.alignment = .center
     field.translatesAutoresizingMaskIntoConstraints = false
-    field.heightAnchor.constraint(equalToConstant: 24).isActive = true
+    field.heightAnchor.constraint(equalToConstant: ShelfStyle.chipHeight).isActive = true
     field.setContentHuggingPriority(.required, for: .horizontal)
     return field
 }

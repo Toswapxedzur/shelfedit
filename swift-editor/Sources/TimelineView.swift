@@ -159,7 +159,7 @@ final class TimelineView: NSView {
 
     private func drawRuler() {
         let rect = NSRect(x: 0, y: bounds.height - rulerHeight, width: bounds.width, height: rulerHeight)
-        NSColor.white.withAlphaComponent(0.90).setFill()
+        NSColor.white.withAlphaComponent(0.72).setFill()
         rect.fill()
 
         let attrs: [NSAttributedString.Key: Any] = [
@@ -180,14 +180,14 @@ final class TimelineView: NSView {
                 path.move(to: NSPoint(x: x, y: rect.minY))
                 path.line(to: NSPoint(x: x, y: rect.maxY))
                 path.lineWidth = 1
-                NSColor(hex: 0x94a3b8, alpha: 0.24).setStroke()
+                NSColor(hex: 0x94a3b8, alpha: 0.14).setStroke()
                 path.stroke()
                 (formatTime(t) as NSString).draw(at: NSPoint(x: x + 4, y: rect.minY + 8), withAttributes: attrs)
             }
             t += step
         }
 
-        NSColor(hex: 0x94a3b8, alpha: 0.25).setStroke()
+        NSColor(hex: 0x94a3b8, alpha: 0.12).setStroke()
         let bottom = NSBezierPath()
         bottom.move(to: NSPoint(x: 0, y: rect.minY))
         bottom.line(to: NSPoint(x: bounds.width, y: rect.minY))
@@ -217,7 +217,7 @@ final class TimelineView: NSView {
                 drawClip(clip, in: row, trackHidden: track.hidden ?? false)
             }
 
-            NSColor(hex: 0x94a3b8, alpha: 0.18).setStroke()
+            NSColor(hex: 0x94a3b8, alpha: 0.10).setStroke()
             let line = NSBezierPath()
             line.move(to: NSPoint(x: 0, y: row.minY))
             line.line(to: NSPoint(x: bounds.width, y: row.minY))
@@ -243,7 +243,7 @@ final class TimelineView: NSView {
         path.fill()
 
         let selected = clip.id == selectedElementId
-        (selected ? ShelfStyle.navy2 : NSColor(hex: 0x334155, alpha: 0.85)).setStroke()
+        (selected ? ShelfStyle.navy2 : NSColor(hex: 0x334155, alpha: 0.24)).setStroke()
         path.lineWidth = selected ? 2.5 : 1
         path.stroke()
 
