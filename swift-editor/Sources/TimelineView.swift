@@ -159,7 +159,7 @@ final class TimelineView: NSView {
 
     private func drawRuler() {
         let rect = NSRect(x: 0, y: bounds.height - rulerHeight, width: bounds.width, height: rulerHeight)
-        NSColor(hex: 0x0f172a, alpha: 0.72).setFill()
+        NSColor.white.withAlphaComponent(0.90).setFill()
         rect.fill()
 
         let attrs: [NSAttributedString.Key: Any] = [
@@ -199,8 +199,8 @@ final class TimelineView: NSView {
         for (displayIndex, track) in sortedTracks.enumerated() {
             let row = rowRect(displayIndex: displayIndex)
             let background = displayIndex.isMultiple(of: 2)
-                ? NSColor(hex: 0x020617, alpha: 0.34)
-                : NSColor(hex: 0x0f172a, alpha: 0.56)
+                ? ShelfStyle.genericLight.withAlphaComponent(0.70)
+                : ShelfStyle.videoLight.withAlphaComponent(0.55)
             background.setFill()
             row.fill()
 
@@ -296,17 +296,17 @@ final class TimelineView: NSView {
         let alpha: CGFloat = hidden ? 0.35 : 0.92
         switch clip.type {
         case .video:
-            return NSColor(hex: 0x1e3a8a, alpha: alpha)
+            return ShelfStyle.videoLight.withAlphaComponent(alpha)
         case .audio:
-            return NSColor(hex: 0x155e75, alpha: alpha)
+            return ShelfStyle.audioLight.withAlphaComponent(alpha)
         case .text:
-            return NSColor(hex: 0x831843, alpha: alpha)
+            return ShelfStyle.textLight.withAlphaComponent(alpha)
         }
     }
 
     private func drawPanelBase() {
         let path = NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12)
-        NSColor(hex: 0x020617, alpha: 0.34).setFill()
+        NSColor.white.withAlphaComponent(0.82).setFill()
         path.fill()
         ShelfStyle.navy.withAlphaComponent(0.80).setFill()
         NSBezierPath(

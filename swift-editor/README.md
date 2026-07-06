@@ -22,10 +22,12 @@ swift build -c release
 
 Current slice:
 
-- Dark-only custom home/dashboard page with recent project cards.
+- Soft-precision home/dashboard page with a thin left settings rail and broad
+  project grid.
 - Existing project picker from `~/.local_ai_video_editor/shelfedit.db`.
 - AVFoundation composition playback across timeline clips.
-- Custom ShelfEdit UI chrome using a dark glass/navy/pastel variant.
+- Custom ShelfEdit UI chrome using grey canvas, white floating boxes, semantic
+  color accents, compact spacing, and shadow-only separation.
 - Editor workspace shell with left tools/assets, center preview, right inspector
   plus AI assist, and full-width timeline.
 - Metal-backed preview surface fed by CoreVideo pixel buffers.

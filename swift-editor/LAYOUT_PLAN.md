@@ -9,17 +9,17 @@ properties on the right, and timeline across the bottom.
 
 ## Design Principles
 
-- Dark mode is the only mode for now.
-- Background is dark gray/near-black, not pure black: use layered dark surfaces
-  such as `#202020`, `#242424`, `#2b2b2b`, and `#111827`.
+- The main/home screen uses a grey/light-blue canvas with white floating boxes.
+- The editor may keep dark media surfaces only where video preview requires it.
 - UI should feel custom, not stock AppKit or SwiftUI.
 - Keep the Apple-native video path untouched: `AVFoundation` ->
   `AVPlayerItemVideoOutput` / CoreVideo -> Metal preview.
-- Prefer rounded cards/panels, soft borders, low-contrast separators, and compact
-  typography.
+- Prefer rounded cards/panels, soft shadows, low-contrast internal strips, and
+  compact typography.
+- Do not use thin borders for separation.
 - Use colored accent stripes/panels to communicate area purpose:
   - blue/cyan = selected/current element data and timeline selection context
-  - red/rose = AI assist, warnings, proposals, destructive suggestions
+  - white = AI assist, with gold fallback only when white conflicts
   - slate/neutral = library/tools/navigation
   - green/teal = timeline/audio/playback state where useful
 
@@ -263,7 +263,10 @@ At narrower widths:
   timeline.
 - Keep current playback/edit behavior working.
 - Add placeholder inspector and AI sections with correct colors and labels.
-- Use white/light buttons and chips inside the dark workspace for contrast.
+- Use white/light buttons and chips inside darker or grey workspaces for
+  contrast.
+- Home has a thin settings rail on the left and a broad video/project entry grid
+  on the right, ending with an empty create tile.
 
 ### Phase L2: Inspector Data Binding
 
