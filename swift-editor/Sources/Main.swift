@@ -151,7 +151,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let previewPanel = GlassPanelView()
         previewPanel.translatesAutoresizingMaskIntoConstraints = false
-        previewPanel.fillColor = NSColor(hex: 0x202020, alpha: 0.94)
+        previewPanel.fillColor = .white
         playerSurface.translatesAutoresizingMaskIntoConstraints = false
         previewPanel.addSubview(playerSurface)
 
