@@ -26,6 +26,8 @@ Current slice:
 - Existing project picker from `~/.local_ai_video_editor/shelfedit.db`.
 - AVFoundation composition playback across timeline clips.
 - Custom ShelfEdit UI chrome using a dark glass/navy/pastel variant.
+- Editor workspace shell with left tools/assets, center preview, right inspector
+  plus AI assist, and full-width timeline.
 - Metal-backed preview surface fed by CoreVideo pixel buffers.
 - Zoomable custom timeline and scrubber.
 - Select, move, trim, split, delete, duplicate, ripple delete.
