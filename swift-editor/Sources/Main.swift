@@ -4,39 +4,13 @@ import CoreMedia
 import Darwin
 import QuartzCore
 
-final class PlayerSurface: NSView {
-    let playerLayer = AVPlayerLayer()
-
-    init(player: AVPlayer) {
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer = CALayer()
-        layer?.backgroundColor = NSColor.black.cgColor
-        playerLayer.player = player
-        playerLayer.videoGravity = .resizeAspect
-        layer?.addSublayer(playerLayer)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        playerLayer.frame = bounds
-        CATransaction.commit()
-    }
-}
-
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate {
     private let database = ShelfDatabase()
 
     private var window: NSWindow!
     private var player = AVPlayer()
-    private var playerSurface: PlayerSurface!
+    private var playerSurface: MetalVideoSurface!
     private var timelineView: TimelineView!
     private var projectPopup: NSPopUpButton!
     private var playButton: NSButton!
@@ -76,7 +50,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func buildWindow() {
-        playerSurface = PlayerSurface(player: player)
+        playerSurface = MetalVideoSurface(player: player)
         timelineView = TimelineView()
         timelineView.onScrub = { [weak self] seconds, final in
             self?.requestSeek(seconds: seconds, final: final)
@@ -92,13 +66,13 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.updateViewportStatus()
         }
 
-        projectPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        projectPopup = StyledPopupButton()
         projectPopup.target = self
         projectPopup.action = #selector(projectChanged)
         projectPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
 
-        playButton = makeButton("Play", #selector(togglePlay))
-        speedPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        playButton = makeButton("Play", #selector(togglePlay), variant: .primary)
+        speedPopup = StyledPopupButton()
         for (label, rate) in [("0.25x", 25), ("0.5x", 50), ("1x", 100), ("1.5x", 150), ("2x", 200)] {
             speedPopup.addItem(withTitle: label)
             speedPopup.lastItem?.tag = rate
@@ -107,8 +81,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         speedPopup.target = self
         speedPopup.action = #selector(speedChanged)
 
-        let zoomOutButton = makeButton("Zoom -", #selector(zoomOut))
-        let zoomInButton = makeButton("Zoom +", #selector(zoomIn))
+        let zoomOutButton = makeButton("Zoom -", #selector(zoomOut), variant: .pill)
+        let zoomInButton = makeButton("Zoom +", #selector(zoomIn), variant: .pill)
         let fitButton = makeButton("Fit", #selector(fitTimeline))
         let centerButton = makeButton("Center", #selector(centerTimeline))
         let splitButton = makeButton("Split", #selector(splitSelected))
@@ -119,15 +93,23 @@ final class AppController: NSObject, NSApplicationDelegate {
         redoButton = makeButton("Redo", #selector(redo))
 
         timeLabel = NSTextField(labelWithString: "00:00.00 / 00:00.00")
-        timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        timeLabel.textColor = .secondaryLabelColor
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        timeLabel.textColor = ShelfStyle.body
         timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         statusLabel = NSTextField(labelWithString: "Loading ShelfEdit projects...")
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.font = ShelfStyle.font(size: 12)
+        statusLabel.textColor = ShelfStyle.body
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+
+        let brandLabel = NSTextField(labelWithString: "ShelfEdit")
+        brandLabel.font = ShelfStyle.bold(size: 18)
+        brandLabel.textColor = ShelfStyle.heading
+        brandLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let toolbar = NSStackView(views: [
+            brandLabel,
             projectPopup,
             playButton,
             speedPopup,
@@ -147,25 +129,60 @@ final class AppController: NSObject, NSApplicationDelegate {
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 8
-        toolbar.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        toolbar.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
 
-        let root = NSStackView(views: [playerSurface, toolbar, timelineView])
-        root.orientation = .vertical
-        root.spacing = 0
-        root.translatesAutoresizingMaskIntoConstraints = false
+        let topBar = FrostedTopBarView()
+        topBar.translatesAutoresizingMaskIntoConstraints = false
+        topBar.addSubview(toolbar)
 
-        let content = NSView()
-        content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.black.cgColor
-        content.addSubview(root)
+        let previewPanel = GlassPanelView()
+        previewPanel.translatesAutoresizingMaskIntoConstraints = false
+        playerSurface.translatesAutoresizingMaskIntoConstraints = false
+        previewPanel.addSubview(playerSurface)
+
+        let timelinePanel = GlassPanelView()
+        timelinePanel.translatesAutoresizingMaskIntoConstraints = false
+        timelinePanel.fillColor = NSColor.white.withAlphaComponent(0.88)
+        timelineView.translatesAutoresizingMaskIntoConstraints = false
+        timelinePanel.addSubview(timelineView)
+
+        let content = AppBackgroundView()
+        content.addSubview(topBar)
+        content.addSubview(previewPanel)
+        content.addSubview(timelinePanel)
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            root.topAnchor.constraint(equalTo: content.topAnchor),
-            root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            topBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            topBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            topBar.topAnchor.constraint(equalTo: content.topAnchor),
+            topBar.heightAnchor.constraint(equalToConstant: 52),
+
+            toolbar.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
+            toolbar.topAnchor.constraint(equalTo: topBar.topAnchor),
+            toolbar.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
+
+            previewPanel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            previewPanel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            previewPanel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+
+            playerSurface.leadingAnchor.constraint(equalTo: previewPanel.leadingAnchor, constant: 14),
+            playerSurface.trailingAnchor.constraint(equalTo: previewPanel.trailingAnchor, constant: -14),
+            playerSurface.topAnchor.constraint(equalTo: previewPanel.topAnchor, constant: 14),
+            playerSurface.bottomAnchor.constraint(equalTo: previewPanel.bottomAnchor, constant: -14),
             playerSurface.heightAnchor.constraint(greaterThanOrEqualToConstant: 360),
-            timelineView.heightAnchor.constraint(greaterThanOrEqualToConstant: 210),
+
+            timelinePanel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            timelinePanel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            timelinePanel.topAnchor.constraint(equalTo: previewPanel.bottomAnchor, constant: 14),
+            timelinePanel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            timelinePanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 230),
+
+            timelineView.leadingAnchor.constraint(equalTo: timelinePanel.leadingAnchor, constant: 12),
+            timelineView.trailingAnchor.constraint(equalTo: timelinePanel.trailingAnchor, constant: -12),
+            timelineView.topAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: 12),
+            timelineView.bottomAnchor.constraint(equalTo: timelinePanel.bottomAnchor, constant: -12),
         ])
 
         window = NSWindow(
@@ -180,10 +197,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         updateEditButtons()
     }
 
-    private func makeButton(_ title: String, _ action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
-        return button
+    private func makeButton(_ title: String, _ action: Selector, variant: StyledButton.Variant = .secondary) -> NSButton {
+        StyledButton(title: title, variant: variant, target: self, action: action)
     }
 
     private func loadProjects() {
@@ -265,6 +280,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let wasPlaying = preservePlayback && player.timeControlStatus == .playing
         let targetTime = requestedTime ?? player.currentTime().seconds
         let result = await CompositionBuilder.build(timeline: loadedProject.timeline, media: loadedProject.media)
+        playerSurface.attach(item: result.item)
         player.replaceCurrentItem(with: result.item)
         duration = max(0.1, result.duration)
         timelineView.duration = duration
