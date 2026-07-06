@@ -1,0 +1,107 @@
+---
+description: ShelfEdit visual design system and custom UI direction for all future apps
+alwaysApply: true
+---
+
+# ShelfEdit UI Style — custom, soft, dashboard-like
+
+Use this visual language for future ShelfEdit web, desktop, extension, and tool
+interfaces. The target feel is light, clean, rounded, low-contrast, and
+productivity-dashboard polished.
+
+## Core Direction
+
+- Design a custom interface for each app. Do not accept the default SwiftUI,
+  AppKit, Qt, browser, or OS-native control look as the final UI.
+- For Swift/macOS apps, Apple-native video and media APIs are still preferred for
+  performance, but the editor chrome, timeline, inspector, transport, panels,
+  buttons, and controls should be custom-styled/drawn to match this design
+  system.
+- Do not use WebView or HTML to transport decoded video frames. Web/native/custom
+  UI choices must not break the zero-copy or near-zero-copy media path.
+- Use Arial, Helvetica, sans-serif everywhere.
+
+## Website UI
+
+- Page background: gradient from `#f8fafc` into pale indigo `#eef2ff`, plus a
+  soft dot grid using `#94a3b8` at 35% opacity.
+- Top bar: fixed 52px height, translucent white `rgba(255,255,255,0.88)`,
+  `backdrop-filter: blur(10px)`, bottom border `rgba(148,163,184,0.25)`.
+  It should feel like frosted glass.
+- Cards: white `#ffffff`, `border-radius: 16px`, shadow
+  `0 12px 34px rgba(15,23,42,0.08)`.
+- Hover cards: lift upward 2px and use shadow
+  `0 8px 18px rgba(15,23,42,0.1)`.
+- Inner cards/tiles: `border-radius: 12px`.
+
+## Buttons And Controls
+
+- Primary buttons: navy `#1e3a8a`, white text, `border-radius: 10px`, no border,
+  bold text. Website buttons use `padding: 8px 14px`, `font-size: 12px`,
+  `font-weight: 700`. Hover: `filter: brightness(0.96)`.
+- Secondary buttons: light slate `#e2e8f0`, text `#0f172a`, same rounded shape.
+- Account button: pill shape, `border-radius: 999px`, gradient
+  `linear-gradient(160deg, #2f6fd0, #1c5ca8)`, white text, small shadow
+  `0 1px 2px rgba(3,16,31,0.25)`.
+- Nav buttons: pill links, `border-radius: 999px`, `font-size: 13px`,
+  `font-weight: 600`, muted text `#64748b`.
+- Active nav: text `#1e3a8a`, background `rgba(28,92,168,0.10)`, border
+  `rgba(28,92,168,0.18)`.
+- Language select: compact rounded rectangle, background `#e2e8f0`, no border,
+  `border-radius: 10px`, `font-size: 12px`, bold.
+
+## Typography And Color
+
+- Main text: `#1f2937`.
+- Headings: `#0f172a`.
+- Body/help text: `#475569` or `#64748b`.
+- Muted text: `#94a3b8`.
+- Heading scale: brand 18px / 700; normal card headings 16px; hero headline
+  20px; large download title 40px / 800; global stats heading 26px.
+- Tag pills: uppercase, `font-size: 10px`, `font-weight: 700`,
+  `letter-spacing: 0.04em`, `border-radius: 999px`, `padding: 3px 8px`.
+
+## Semantic Tag Colors
+
+- Home/platform: background `#eef2ff`, text `#1e3a8a`.
+- Feature/free/custom: background `#fffbeb`, text `#854d0e`.
+- Account/snooze: background `#fdf2f8`, text `#9d174d`.
+- Download/filter/cyan: background `#ecfeff`, text `#155e75`.
+- Docs/slate: background `#e2e8f0`, text `#475569`.
+- Danger: background `#fee2e2`, text `#991b1b`.
+
+## Inputs And Feedback
+
+- Inputs: white background, no visible border, inset border via
+  `box-shadow: inset 0 0 0 1px rgba(148,163,184,0.45)`, `border-radius: 10px`.
+- Input focus: `0 0 0 3px rgba(30,58,138,0.18)` plus navy inset outline.
+- Focus arrows: perfect circles, 42px by 42px, white
+  `rgba(255,255,255,0.96)`, navy arrow `#1c5ca8`, border
+  `rgba(28,92,168,0.35)`, shadow `0 4px 14px rgba(3,16,31,0.22)`.
+  Hover scales to 1.12.
+- Popup feedback overlay: local to each card. Soft dim `rgba(15,23,42,0.05)`,
+  message card white, `border-radius: 12px`, shadow
+  `0 14px 34px rgba(15,23,42,0.26)`, animated from
+  `translateY(8px) scale(0.97)` to normal.
+
+## Extension / App UI
+
+- Same font: Arial, sans-serif.
+- Popup/app background: vertical gradient `#f8fafc` to `#eef2ff`.
+- Main panels: translucent white `rgba(255,255,255,0.92)`, `border-radius: 16px`,
+  shadow `0 12px 34px rgba(15,23,42,0.08)`.
+- App buttons are smaller: primary navy `#1e3a8a`, white text,
+  `border-radius: 10px`, `font-size: 10px`, `font-weight: 700`,
+  `padding: 5px 8px`.
+- Group cards: pale navy-white mix, `border-radius: 12px`, shadow
+  `0 4px 14px rgba(15,23,42,0.06)`.
+- Active group: `#eef2ff` with shadow `0 8px 18px rgba(30,58,138,0.16)`.
+- Section cards: `border-radius: 12px`, soft background tint, no border, left
+  vertical accent stripe 4px wide with rounded right edge. This is a major style
+  signature.
+
+## Summary Signature
+
+Smooth rounded vertices, soft glass/chrome, navy primary actions, slate text,
+pastel semantic panels, compact Arial typography, no hard borders, shadows
+instead of outlines, and pill controls for nav/tags/segmented actions.
