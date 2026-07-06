@@ -1,0 +1,119 @@
+---
+description: Native MLT/Qt app (app/) — scrubbing and heavy-source playback anti-patterns we already tried and ruled out
+alwaysApply: true
+---
+
+# Native scrub / heavy-source playback — what NOT to do
+
+This applies to the **native rebuild** under `app/` (Qt + MLT + WebEngine timeline).
+It records failed approaches from real debugging on 3.4K 60fps footage (~3456×2234,
+44 min and 7 min). Do not re-try these without new evidence.
+
+## What actually works (keep this)
+
+- **Backpressure scrubbing in the HTML UI** (`app/web/app.js`): at most **one seek
+  in flight**; coalesce pointer moves to the latest cursor time; release the lock
+  when a frame arrives (or on an adaptive safety timeout).
+- **Adaptive safety timeout** derived from measured decode latency (`decodeEma`),
+  always **above** real decode time. A fixed ~120 ms timer on heavy sources
+  preempts in-flight decodes and re-creates the frozen-preview bug.
+- **Consumer refresh path for scrubbing**: `seek → purge → refresh` on the paused
+  transport; frames arrive via `consumer-frame-show`. Do not add a second render
+  path unless you have proof it is faster *and* race-free.
+- **1080p preview box** in the engine profile (scale down, never upscale source).
+- **Proxy media** for editing when the source is huge — but only as **background /
+  progressive** generation, never as a blocking “wait 6+ minutes before edit” gate.
+
+---
+
+## NEVER do these (ruled out with measurements)
+
+### Scrub / seek UI
+
+- ❌ **Seek on every pointer move with no backpressure.** Pointer events arrive
+  ~16 ms apart; decode takes ~35–250 ms on heavy sources. Each seek’s purge throws
+  away the previous half-decoded frame → preview **freezes while the playhead line
+  moves**. This was the original backward-scrub bug.
+- ❌ **Fixed short safety timeout** (e.g. 120 ms) on heavy footage. When decode >
+  timeout, the timer releases the lock mid-decode, the next seek purges, and you
+  get ~4 seeks per 1 rendered frame. Use adaptive timeout from `decodeEma`.
+- ❌ **Move the playhead line from engine position echoes during scrub.** The
+  cursor owns the line during drag; only playback should follow engine position.
+
+### Engine / MLT consumer
+
+- ❌ **Stop the SDL audio consumer on every scrub gesture** (`consumer->stop()`).
+  Measured **~800 ms per stop** (audio device teardown). This alone makes scrubbing
+  feel unusable (“playhead won’t catch the cursor”) even if decode is fast.
+- ❌ **Add a parallel “direct render” scrub path** (`get_frame()` while the audio
+  consumer still runs, or stop/start consumer around it) **without** proving no
+  races and no double the latency. We tried this; it fought the working path and
+  regressed UX.
+- ❌ **Seek to re-sync during playback.** Paused scrub uses purge+refresh; playback
+  uses the audio consumer as master clock. Do not mix the two models.
+
+### Keyframes / “dynamic scrub”
+
+- ❌ **Assume keyframe-snapped seeking fixes 3.4K lag by itself.** Source already
+  has ~1 s keyframe spacing. Snapping alone did not reduce engine latency; landing
+  on an I-frame is not cheaper than decoding forward within a GOP on this stack.
+- ❌ **Build keyframe indexes with decode-based ffprobe** (`-skip_frame nokey` on
+  frames). That decodes every keyframe and takes minutes. Use **packet flags only**
+  if an index is ever needed again (~5 s for 44 min).
+- ❌ **Keyframe snap + direct render as the default scrub** without user-visible
+  benefit. It added complexity and made scrubbing **worse** in the live app.
+
+### Proxies / transcode
+
+- ❌ **Blocking full-file proxy at import** using `-hwaccel videotoolbox` on this
+  source. Hardware decode was **~5× slower** than software for odd 3456×2234 H.264;
+  full proxy landed ~2× realtime (~20 min for 44 min). Software decode + scale +
+  hw encode ≈ **6–7× realtime** (~6 min) — still too long to block the user.
+- ❌ **Parallel segment encodes expecting linear speedup.** Four concurrent jobs
+  barely beat one (~7.6× vs ~6.7×) — encoder/memory bandwidth saturates.
+- ❌ **Proxy as the only plan** without background/progressive generation. CapCut
+  feels instant because editing starts on the original and proxies swap in later.
+
+### “Structural” misdiagnoses
+
+- ❌ **Treat RSS growth during wide seeks as a leak.** On 44 min 3.4K, ~1 GB RSS
+  was live decode buffers across seek distance, not unbounded leak. MLT cache-bounding
+  properties did not help.
+- ❌ **Split one long clip into many sequential clips** expecting less lag. Same
+  source resolution and same per-seek decode cost; timeline length does not change
+  per-frame work.
+- ❌ **Allocate more RAM to the app.** Does not reduce per-seek decode cost.
+- ❌ **Lower preview output resolution alone** expecting faster scrub. Measured:
+  1080 → 180 px preview profile did **not** change seek latency; cost is in producing
+  a new source frame after seek, not in final scale.
+- ❌ **Use hardware decode in ffmpeg/MLT for this file without benchmarking.**
+  Software decode was ~9× realtime vs VideoToolbox ~1.8× on the same sample.
+
+---
+
+## If scrub regresses — debug protocol
+
+1. **Read `/tmp/shelfedit.log`** (JS + engine via `appLog` / bridge log).
+2. Compare **`issueSeek` count vs `positionChanged (scrub frame)` count**. Ratio
+   far above 1:1 → backpressure or safety timeout is wrong.
+3. Check **latency from `issueSeek` to scrub frame**. ~800 ms on first gesture →
+   look for `consumer->stop()` or consumer restart, not decode.
+4. Check **`decodeEma` vs `safety` in issueSeek logs**. Safety below real decode →
+   purge mid-flight.
+5. Fix **inside the working design** (backpressure + consumer refresh). Do not add
+   a third render path on speculation.
+
+---
+
+## Reference editors (copy, don’t invent)
+
+For hard playback/scrub/sync problems on this stack, study how existing editors
+solved it (see also `preview-playback-architecture.mdc` for the browser path):
+
+- **Shotcut / MLT** — consumer refresh while paused, audio clock while playing.
+- **elah, nimone/fast-video-cut** — frame copy-out, decode-ahead, no seek spam.
+- **CapCut / Resolve / Premiere** — proxies in background, dynamic scrub defers
+  exact frames; never block the user on a full transcode.
+
+When ANY hard problem appears, reference an existing editor first. We do not
+invent novel approaches in the video-editing core.

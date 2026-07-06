@@ -10,6 +10,13 @@ alwaysApply: true
 - Whenever a change is verified working (build passes and the user confirms, or a
   feature is complete), commit it and **push to `origin/main`** so there is a
   known-good snapshot on GitHub.
+- In ongoing work, do not let more than **5 user requests / meaningful task
+  turns** pass without pushing a verified snapshot to GitHub. If the fifth
+  request lands while the workspace is broken or tests have not passed, finish
+  the smallest safe verification first, then commit and push immediately.
+- Do not include large local media, generated build folders, or unrelated dirty
+  files just to satisfy the 5-request cadence; push only source/config/docs that
+  belong to the verified snapshot.
 - Use short, imperative commit messages matching the existing history
   (e.g. "Fix preview freezing during playback").
 
