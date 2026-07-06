@@ -10,8 +10,10 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private var window: NSWindow!
     private var player = AVPlayer()
+    private var homeView: HomeView!
     private var playerSurface: MetalVideoSurface!
     private var timelineView: TimelineView!
+    private var editorPanels: [NSView] = []
     private var projectPopup: NSPopUpButton!
     private var playButton: NSButton!
     private var speedPopup: NSPopUpButton!
@@ -51,6 +53,10 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         playerSurface = MetalVideoSurface(player: player)
+        homeView = HomeView()
+        homeView.onOpenProject = { [weak self] id in
+            self?.loadProject(id: id)
+        }
         timelineView = TimelineView()
         timelineView.onScrub = { [weak self] seconds, final in
             self?.requestSeek(seconds: seconds, final: final)
@@ -107,9 +113,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         brandLabel.font = ShelfStyle.bold(size: 18)
         brandLabel.textColor = ShelfStyle.heading
         brandLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let homeButton = makeButton("Home", #selector(showHome), variant: .pill)
 
         let toolbar = NSStackView(views: [
             brandLabel,
+            homeButton,
             projectPopup,
             playButton,
             speedPopup,
@@ -143,14 +151,18 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let timelinePanel = GlassPanelView()
         timelinePanel.translatesAutoresizingMaskIntoConstraints = false
-        timelinePanel.fillColor = NSColor.white.withAlphaComponent(0.88)
+        timelinePanel.fillColor = ShelfStyle.panelStrong
         timelineView.translatesAutoresizingMaskIntoConstraints = false
         timelinePanel.addSubview(timelineView)
 
         let content = AppBackgroundView()
+        homeView.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(topBar)
+        content.addSubview(homeView)
         content.addSubview(previewPanel)
         content.addSubview(timelinePanel)
+        editorPanels = [previewPanel, timelinePanel]
+        setEditorVisible(false)
 
         NSLayoutConstraint.activate([
             topBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -162,6 +174,11 @@ final class AppController: NSObject, NSApplicationDelegate {
             toolbar.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
             toolbar.topAnchor.constraint(equalTo: topBar.topAnchor),
             toolbar.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
+
+            homeView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            homeView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            homeView.topAnchor.constraint(equalTo: topBar.bottomAnchor),
+            homeView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
             previewPanel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             previewPanel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
@@ -204,19 +221,28 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func loadProjects() {
         do {
             projects = try database.listProjects()
+            homeView.update(projects: projects)
             projectPopup.removeAllItems()
             for project in projects {
                 projectPopup.addItem(withTitle: "\(project.name)  (\(project.mediaCount))")
                 projectPopup.lastItem?.representedObject = project.id
             }
-            guard let first = projects.first else {
+            guard !projects.isEmpty else {
                 statusLabel.stringValue = "No ShelfEdit projects found in ~/.local_ai_video_editor/shelfedit.db"
                 return
             }
-            loadProject(id: first.id)
+            statusLabel.stringValue = "Choose a project from Home."
         } catch {
             statusLabel.stringValue = error.localizedDescription
         }
+    }
+
+    @objc private func showHome() {
+        player.pause()
+        playButton.title = "Play"
+        setEditorVisible(false)
+        window.title = "ShelfEdit"
+        statusLabel.stringValue = "Choose a project from Home."
     }
 
     @objc private func projectChanged() {
@@ -232,11 +258,15 @@ final class AppController: NSObject, NSApplicationDelegate {
             var project = try database.loadProject(id: id)
             normalizeTimeline(&project.timeline, media: project.media)
             loadedProject = project
+            if let item = projectPopup.itemArray.first(where: { ($0.representedObject as? String) == id }) {
+                projectPopup.select(item)
+            }
             selectedElementId = nil
             timelineView.selectedElementId = nil
             undoStack.removeAll()
             redoStack.removeAll()
             applyTimelineToView()
+            setEditorVisible(true)
             window.title = "ShelfEdit Swift Native - \(project.summary.name)"
             statusLabel.stringValue = "Loaded \(project.summary.name)"
             Task { await rebuildPlayer(keepTime: 0, preservePlayback: false) }
@@ -247,6 +277,11 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func normalizeTimeline(_ timeline: inout TimelineData, media: [String: MediaAsset]) {
         ensurePlayableTimeline(&timeline, media: media)
+    }
+
+    private func setEditorVisible(_ visible: Bool) {
+        homeView?.isHidden = visible
+        editorPanels.forEach { $0.isHidden = !visible }
     }
 
     private func applyTimelineToView() {

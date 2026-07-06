@@ -2,18 +2,19 @@ import AppKit
 
 enum ShelfStyle {
     static let fontName = "Arial"
-    static let heading = NSColor(hex: 0x0f172a)
-    static let text = NSColor(hex: 0x1f2937)
-    static let body = NSColor(hex: 0x475569)
+    static let heading = NSColor(hex: 0xf8fafc)
+    static let text = NSColor(hex: 0xe5e7eb)
+    static let body = NSColor(hex: 0xcbd5e1)
     static let muted = NSColor(hex: 0x94a3b8)
-    static let navy = NSColor(hex: 0x1e3a8a)
-    static let navy2 = NSColor(hex: 0x1c5ca8)
-    static let slateButton = NSColor(hex: 0xe2e8f0)
-    static let panel = NSColor.white.withAlphaComponent(0.92)
-    static let indigoSoft = NSColor(hex: 0xeef2ff)
-    static let cyanSoft = NSColor(hex: 0xecfeff)
-    static let amberSoft = NSColor(hex: 0xfffbeb)
-    static let pinkSoft = NSColor(hex: 0xfdf2f8)
+    static let navy = NSColor(hex: 0x3b82f6)
+    static let navy2 = NSColor(hex: 0x60a5fa)
+    static let slateButton = NSColor(hex: 0x1e293b)
+    static let panel = NSColor(hex: 0x0f172a, alpha: 0.88)
+    static let panelStrong = NSColor(hex: 0x111827, alpha: 0.96)
+    static let indigoSoft = NSColor(hex: 0x1e1b4b)
+    static let cyanSoft = NSColor(hex: 0x083344)
+    static let amberSoft = NSColor(hex: 0x451a03)
+    static let pinkSoft = NSColor(hex: 0x4a044e)
 
     static func font(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont(name: fontName, size: size) ?? .systemFont(ofSize: size, weight: weight)
@@ -47,13 +48,13 @@ final class AppBackgroundView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let gradient = NSGradient(colors: [NSColor(hex: 0xf8fafc), ShelfStyle.indigoSoft])
+        let gradient = NSGradient(colors: [NSColor(hex: 0x020617), NSColor(hex: 0x0f172a), NSColor(hex: 0x1e1b4b)])
         gradient?.draw(in: bounds, angle: -90)
         drawDotGrid()
     }
 
     private func drawDotGrid() {
-        NSColor(hex: 0x94a3b8, alpha: 0.35).setFill()
+        NSColor(hex: 0x94a3b8, alpha: 0.18).setFill()
         let spacing: CGFloat = 22
         var y: CGFloat = 10
         while y < bounds.height {
@@ -76,10 +77,10 @@ final class GlassPanelView: NSView {
         wantsLayer = true
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = false
-        layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.08
-        layer?.shadowRadius = 17
-        layer?.shadowOffset = CGSize(width: 0, height: -6)
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.28
+        layer?.shadowRadius = 22
+        layer?.shadowOffset = CGSize(width: 0, height: -10)
     }
 
     required init?(coder: NSCoder) {
@@ -105,8 +106,8 @@ final class FrostedTopBarView: NSVisualEffectView {
         blendingMode = .withinWindow
         state = .active
         wantsLayer = true
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
-        layer?.borderColor = NSColor(hex: 0x94a3b8, alpha: 0.25).cgColor
+        layer?.backgroundColor = NSColor(hex: 0x020617, alpha: 0.86).cgColor
+        layer?.borderColor = NSColor(hex: 0x94a3b8, alpha: 0.18).cgColor
         layer?.borderWidth = 1
     }
 
@@ -133,7 +134,7 @@ final class StyledButton: NSButton {
         isBordered = false
         bezelStyle = .regularSquare
         font = ShelfStyle.bold(size: 10)
-        contentTintColor = variant == .secondary ? ShelfStyle.heading : .white
+        contentTintColor = variant == .secondary ? ShelfStyle.body : .white
         wantsLayer = true
         setButtonType(.momentaryPushIn)
         translatesAutoresizingMaskIntoConstraints = false
@@ -155,10 +156,12 @@ final class StyledButton: NSButton {
             contentTintColor = .white
         case .secondary:
             layer?.backgroundColor = ShelfStyle.slateButton.withAlphaComponent(disabledAlpha).cgColor
-            contentTintColor = ShelfStyle.heading.withAlphaComponent(disabledAlpha)
+            layer?.borderColor = NSColor(hex: 0x334155, alpha: disabledAlpha).cgColor
+            layer?.borderWidth = 1
+            contentTintColor = ShelfStyle.body.withAlphaComponent(disabledAlpha)
         case .pill:
             layer?.backgroundColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha).cgColor
-            layer?.shadowColor = NSColor(hex: 0x03101f).cgColor
+            layer?.shadowColor = NSColor.black.cgColor
             layer?.shadowOpacity = isEnabled ? 0.18 : 0
             layer?.shadowRadius = 2
             layer?.shadowOffset = CGSize(width: 0, height: -1)
@@ -179,6 +182,8 @@ final class StyledPopupButton: NSPopUpButton {
         contentTintColor = ShelfStyle.heading
         wantsLayer = true
         layer?.backgroundColor = ShelfStyle.slateButton.cgColor
+        layer?.borderColor = NSColor(hex: 0x334155, alpha: 0.9).cgColor
+        layer?.borderWidth = 1
         layer?.cornerRadius = 10
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 28).isActive = true
@@ -196,7 +201,7 @@ final class AccentPanelView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 12
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.62).cgColor
+        layer?.backgroundColor = NSColor(hex: 0x0f172a, alpha: 0.72).cgColor
     }
 
     required init?(coder: NSCoder) {
