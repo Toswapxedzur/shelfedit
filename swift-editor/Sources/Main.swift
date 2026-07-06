@@ -22,6 +22,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var speedPopup: NSPopUpButton!
     private var undoButton: NSButton!
     private var redoButton: NSButton!
+    private var selectToolButton: NSButton!
+    private var bladeToolButton: NSButton!
     private var timeLabel: NSTextField!
     private var statusLabel: NSTextField!
 
@@ -35,6 +37,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var undoStack: [TimelineData] = []
     private var redoStack: [TimelineData] = []
     private var interactiveBaseTimeline: TimelineData?
+    private var activeTimelineTool: TimelineTool = .select
 
     private var seekInFlight = false
     private var pendingSeek: (seconds: Double, final: Bool)?
@@ -77,6 +80,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.refreshInspector()
             self?.updateEditButtons()
         }
+        timelineView.onBlade = { [weak self] id, seconds in
+            self?.bladeSplit(elementId: id, at: seconds)
+        }
         timelineView.onClipDrag = { [weak self] id, kind, delta, final in
             self?.applyInteractiveDrag(elementId: id, kind: kind, delta: delta, final: final)
         }
@@ -99,6 +105,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         speedPopup.target = self
         speedPopup.action = #selector(speedChanged)
 
+        selectToolButton = makeButton("Select", #selector(selectTimelineTool), variant: .pill)
+        bladeToolButton = makeButton("Blade", #selector(bladeTimelineTool), variant: .pill)
         let zoomOutButton = makeButton("Zoom -", #selector(zoomOut), variant: .pill)
         let zoomInButton = makeButton("Zoom +", #selector(zoomIn), variant: .pill)
         let fitButton = makeButton("Fit", #selector(fitTimeline))
@@ -121,40 +129,32 @@ final class AppController: NSObject, NSApplicationDelegate {
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.maximumNumberOfLines = 1
 
-        let brandLabel = NSTextField(labelWithString: "ShelfEdit")
-        brandLabel.font = ShelfStyle.bold(size: 18)
-        brandLabel.textColor = ShelfStyle.heading
-        brandLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let homeButton = makeButton("Home", #selector(showHome), variant: .pill)
-
-        let toolbar = NSStackView(views: [
-            brandLabel,
-            homeButton,
-            projectPopup,
+        let timelineToolStrip = makeTimelineToolStrip(views: [
             playButton,
             speedPopup,
-            zoomOutButton,
-            zoomInButton,
-            fitButton,
-            centerButton,
+            selectToolButton,
+            bladeToolButton,
             splitButton,
             deleteButton,
             duplicateButton,
             rippleButton,
             undoButton,
             redoButton,
+            zoomOutButton,
+            zoomInButton,
+            fitButton,
+            centerButton,
             timeLabel,
             statusLabel,
         ])
-        toolbar.orientation = .horizontal
-        toolbar.alignment = .centerY
-        toolbar.spacing = 8
-        toolbar.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-
-        let topBar = FrostedTopBarView()
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        topBar.addSubview(toolbar)
+        if let select = selectToolButton as? StyledButton {
+            select.activeFillColor = ShelfStyle.videoLight
+            select.activeTintColor = ShelfStyle.videoHeavy
+        }
+        if let blade = bladeToolButton as? StyledButton {
+            blade.activeFillColor = ShelfStyle.textLight
+            blade.activeTintColor = ShelfStyle.textHeavy
+        }
 
         let previewPanel = GlassPanelView()
         previewPanel.translatesAutoresizingMaskIntoConstraints = false
@@ -166,13 +166,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         timelinePanel.translatesAutoresizingMaskIntoConstraints = false
         timelinePanel.fillColor = ShelfStyle.panelStrong
         timelineView.translatesAutoresizingMaskIntoConstraints = false
+        timelineToolStrip.translatesAutoresizingMaskIntoConstraints = false
+        timelinePanel.addSubview(timelineToolStrip)
         timelinePanel.addSubview(timelineView)
 
         let content = AppBackgroundView()
         homeView.translatesAutoresizingMaskIntoConstraints = false
         toolShelfView.translatesAutoresizingMaskIntoConstraints = false
         inspectorPanelView.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(topBar)
         content.addSubview(homeView)
         content.addSubview(toolShelfView)
         content.addSubview(previewPanel)
@@ -182,34 +183,24 @@ final class AppController: NSObject, NSApplicationDelegate {
         setEditorVisible(false)
 
         NSLayoutConstraint.activate([
-            topBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            topBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            topBar.topAnchor.constraint(equalTo: content.topAnchor),
-            topBar.heightAnchor.constraint(equalToConstant: ShelfStyle.toolbarHeight),
-
-            toolbar.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
-            toolbar.topAnchor.constraint(equalTo: topBar.topAnchor),
-            toolbar.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
-
             homeView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             homeView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            homeView.topAnchor.constraint(equalTo: topBar.bottomAnchor),
+            homeView.topAnchor.constraint(equalTo: content.topAnchor),
             homeView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
             toolShelfView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            toolShelfView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            toolShelfView.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             toolShelfView.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
             toolShelfView.widthAnchor.constraint(equalToConstant: 330),
 
             inspectorPanelView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            inspectorPanelView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            inspectorPanelView.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             inspectorPanelView.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
             inspectorPanelView.widthAnchor.constraint(equalToConstant: 360),
 
             previewPanel.leadingAnchor.constraint(equalTo: toolShelfView.trailingAnchor, constant: 14),
             previewPanel.trailingAnchor.constraint(equalTo: inspectorPanelView.leadingAnchor, constant: -14),
-            previewPanel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            previewPanel.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             previewPanel.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
 
             playerSurface.leadingAnchor.constraint(equalTo: previewPanel.leadingAnchor, constant: 14),
@@ -224,9 +215,14 @@ final class AppController: NSObject, NSApplicationDelegate {
             timelinePanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 270),
             timelinePanel.heightAnchor.constraint(equalTo: content.heightAnchor, multiplier: 0.34),
 
+            timelineToolStrip.leadingAnchor.constraint(equalTo: timelinePanel.leadingAnchor, constant: 12),
+            timelineToolStrip.trailingAnchor.constraint(equalTo: timelinePanel.trailingAnchor, constant: -12),
+            timelineToolStrip.topAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: 12),
+            timelineToolStrip.heightAnchor.constraint(equalToConstant: 40),
+
             timelineView.leadingAnchor.constraint(equalTo: timelinePanel.leadingAnchor, constant: 12),
             timelineView.trailingAnchor.constraint(equalTo: timelinePanel.trailingAnchor, constant: -12),
-            timelineView.topAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: 12),
+            timelineView.topAnchor.constraint(equalTo: timelineToolStrip.bottomAnchor, constant: 8),
             timelineView.bottomAnchor.constraint(equalTo: timelinePanel.bottomAnchor, constant: -12),
         ])
 
@@ -239,11 +235,31 @@ final class AppController: NSObject, NSApplicationDelegate {
         window.title = "ShelfEdit Swift Native"
         window.contentView = content
         window.makeKeyAndOrderFront(nil)
+        setTimelineTool(.select)
         updateEditButtons()
     }
 
     private func makeButton(_ title: String, _ action: Selector, variant: StyledButton.Variant = .secondary) -> NSButton {
         StyledButton(title: title, variant: variant, target: self, action: action)
+    }
+
+    private func makeTimelineToolStrip(views: [NSView]) -> NSView {
+        let strip = GlassPanelView()
+        strip.cornerRadius = ShelfStyle.radiusCard
+        strip.fillColor = ShelfStyle.childPanel
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        strip.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: strip.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: strip.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: strip.topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: strip.bottomAnchor, constant: -4),
+        ])
+        return strip
     }
 
     private func loadProjects() {
@@ -563,6 +579,23 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func selectTimelineTool() {
+        setTimelineTool(.select)
+    }
+
+    @objc private func bladeTimelineTool() {
+        setTimelineTool(.blade)
+    }
+
+    private func setTimelineTool(_ tool: TimelineTool) {
+        activeTimelineTool = tool
+        timelineView.activeTool = tool
+        updateTimelineToolButtons()
+        statusLabel.stringValue = tool == .blade
+            ? "Blade mode: click a clip to split it at that frame."
+            : "Select mode: click, drag, and trim clips."
+    }
+
     @objc private func zoomIn() {
         zoom(by: 0.5)
     }
@@ -654,16 +687,30 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func splitSelected() {
-        guard var project = loadedProject, let selectedElementId else { return }
-        let playhead = timelineView.currentTime
-        guard let clip = project.timeline.element(withId: selectedElementId), playhead > clip.timelineStart, playhead < clip.end else {
+        guard let selectedElementId else { return }
+        if !splitElement(withId: selectedElementId, at: timelineView.currentTime) {
             statusLabel.stringValue = "Move playhead inside the selected clip to split."
-            return
+        }
+    }
+
+    private func bladeSplit(elementId: String, at seconds: Double) {
+        if splitElement(withId: elementId, at: seconds) {
+            statusLabel.stringValue = "Blade split at \(formatTime(seconds))."
+        } else {
+            statusLabel.stringValue = "Blade needs a point inside the clip."
+        }
+    }
+
+    @discardableResult
+    private func splitElement(withId elementId: String, at seconds: Double) -> Bool {
+        guard var project = loadedProject, let clip = project.timeline.element(withId: elementId) else { return false }
+        let fps = project.timeline.canvas?.fps ?? 30
+        let splitAt = snapped(seconds, fps: fps)
+        guard splitAt > clip.timelineStart, splitAt < clip.end else {
+            return false
         }
         pushUndoSnapshot()
-        let fps = project.timeline.canvas?.fps ?? 30
-        let splitAt = snapped(playhead, fps: fps)
-        _ = project.timeline.updateElement(withId: selectedElementId) { first in
+        _ = project.timeline.updateElement(withId: elementId) { first in
             if first.type == .text {
                 first.timelineEnd = splitAt
             } else {
@@ -686,6 +733,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         self.selectedElementId = second.id
         timelineView.selectedElementId = second.id
         afterTimelineMutation(save: true, rebuild: true)
+        return true
     }
 
     @objc private func deleteSelected() {
@@ -832,6 +880,12 @@ final class AppController: NSObject, NSApplicationDelegate {
                 button.isEnabled = hasSelection
             }
         }
+        updateTimelineToolButtons()
+    }
+
+    private func updateTimelineToolButtons() {
+        (selectToolButton as? StyledButton)?.isActiveStyle = activeTimelineTool == .select
+        (bladeToolButton as? StyledButton)?.isActiveStyle = activeTimelineTool == .blade
     }
 }
 
