@@ -428,10 +428,10 @@ final class InspectorPanelView: GlassPanelView {
         let chip = label(text, size: 11, weight: .bold, color: ShelfStyle.buttonText)
         chip.wantsLayer = true
         chip.layer?.backgroundColor = ShelfStyle.genericLight.cgColor
-        chip.layer?.cornerRadius = 12
+        chip.layer?.cornerRadius = ShelfStyle.chipHeight / 2
         chip.alignment = .center
         chip.translatesAutoresizingMaskIntoConstraints = false
-        chip.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        chip.heightAnchor.constraint(equalToConstant: ShelfStyle.chipHeight).isActive = true
         return chip
     }
 
