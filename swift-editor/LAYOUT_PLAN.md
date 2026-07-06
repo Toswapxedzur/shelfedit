@@ -257,11 +257,13 @@ At narrower widths:
 
 ### Phase L1: Static Layout Shell
 
+- Status: implemented as the current editor shell.
 - Add a persistent editor workspace container.
 - Split editor into top bar, left panel, center preview, right panel, bottom
   timeline.
 - Keep current playback/edit behavior working.
 - Add placeholder inspector and AI sections with correct colors and labels.
+- Use white/light buttons and chips inside the dark workspace for contrast.
 
 ### Phase L2: Inspector Data Binding
 

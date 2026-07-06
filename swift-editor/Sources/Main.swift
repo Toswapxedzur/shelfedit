@@ -11,7 +11,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var player = AVPlayer()
     private var homeView: HomeView!
+    private var toolShelfView: ToolShelfView!
     private var playerSurface: MetalVideoSurface!
+    private var inspectorPanelView: InspectorPanelView!
     private var timelineView: TimelineView!
     private var editorPanels: [NSView] = []
     private var projectPopup: NSPopUpButton!
@@ -53,6 +55,8 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         playerSurface = MetalVideoSurface(player: player)
+        toolShelfView = ToolShelfView()
+        inspectorPanelView = InspectorPanelView()
         homeView = HomeView()
         homeView.onOpenProject = { [weak self] id in
             self?.loadProject(id: id)
@@ -63,6 +67,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         timelineView.onSelect = { [weak self] id in
             self?.selectedElementId = id
+            self?.refreshInspector()
             self?.updateEditButtons()
         }
         timelineView.onClipDrag = { [weak self] id, kind, delta, final in
@@ -146,6 +151,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let previewPanel = GlassPanelView()
         previewPanel.translatesAutoresizingMaskIntoConstraints = false
+        previewPanel.fillColor = NSColor(hex: 0x202020, alpha: 0.94)
         playerSurface.translatesAutoresizingMaskIntoConstraints = false
         previewPanel.addSubview(playerSurface)
 
@@ -157,11 +163,15 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         let content = AppBackgroundView()
         homeView.translatesAutoresizingMaskIntoConstraints = false
+        toolShelfView.translatesAutoresizingMaskIntoConstraints = false
+        inspectorPanelView.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(topBar)
         content.addSubview(homeView)
+        content.addSubview(toolShelfView)
         content.addSubview(previewPanel)
+        content.addSubview(inspectorPanelView)
         content.addSubview(timelinePanel)
-        editorPanels = [previewPanel, timelinePanel]
+        editorPanels = [toolShelfView, previewPanel, inspectorPanelView, timelinePanel]
         setEditorVisible(false)
 
         NSLayoutConstraint.activate([
@@ -180,9 +190,20 @@ final class AppController: NSObject, NSApplicationDelegate {
             homeView.topAnchor.constraint(equalTo: topBar.bottomAnchor),
             homeView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
-            previewPanel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            previewPanel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            toolShelfView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            toolShelfView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            toolShelfView.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
+            toolShelfView.widthAnchor.constraint(equalToConstant: 330),
+
+            inspectorPanelView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            inspectorPanelView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            inspectorPanelView.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
+            inspectorPanelView.widthAnchor.constraint(equalToConstant: 360),
+
+            previewPanel.leadingAnchor.constraint(equalTo: toolShelfView.trailingAnchor, constant: 14),
+            previewPanel.trailingAnchor.constraint(equalTo: inspectorPanelView.leadingAnchor, constant: -14),
             previewPanel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 14),
+            previewPanel.bottomAnchor.constraint(equalTo: timelinePanel.topAnchor, constant: -14),
 
             playerSurface.leadingAnchor.constraint(equalTo: previewPanel.leadingAnchor, constant: 14),
             playerSurface.trailingAnchor.constraint(equalTo: previewPanel.trailingAnchor, constant: -14),
@@ -192,9 +213,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
             timelinePanel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             timelinePanel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            timelinePanel.topAnchor.constraint(equalTo: previewPanel.bottomAnchor, constant: 14),
             timelinePanel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
-            timelinePanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 230),
+            timelinePanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 270),
+            timelinePanel.heightAnchor.constraint(equalTo: content.heightAnchor, multiplier: 0.34),
 
             timelineView.leadingAnchor.constraint(equalTo: timelinePanel.leadingAnchor, constant: 12),
             timelineView.trailingAnchor.constraint(equalTo: timelinePanel.trailingAnchor, constant: -12),
@@ -258,6 +279,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             var project = try database.loadProject(id: id)
             normalizeTimeline(&project.timeline, media: project.media)
             loadedProject = project
+            toolShelfView.update(media: Array(project.media.values))
             if let item = projectPopup.itemArray.first(where: { ($0.representedObject as? String) == id }) {
                 projectPopup.select(item)
             }
@@ -290,8 +312,20 @@ final class AppController: NSObject, NSApplicationDelegate {
         timelineView.timeline = loadedProject.timeline
         timelineView.duration = duration
         timelineView.setViewport(start: timelineView.visibleStart, duration: min(max(0.25, timelineView.visibleDuration), max(0.25, duration)))
+        refreshInspector()
         updateLabels(seconds: player.currentTime().seconds)
         updateEditButtons()
+    }
+
+    private func refreshInspector() {
+        guard let loadedProject else {
+            inspectorPanelView?.update(selection: nil, media: [:])
+            return
+        }
+        inspectorPanelView.update(
+            selection: selectedElementId.flatMap { loadedProject.timeline.element(withId: $0) },
+            media: loadedProject.media
+        )
     }
 
     private func installTimeObserver() {

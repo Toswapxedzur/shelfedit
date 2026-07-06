@@ -15,6 +15,8 @@ enum ShelfStyle {
     static let cyanSoft = NSColor(hex: 0x083344)
     static let amberSoft = NSColor(hex: 0x451a03)
     static let pinkSoft = NSColor(hex: 0x4a044e)
+    static let buttonText = NSColor(hex: 0x111827)
+    static let whiteButton = NSColor.white.withAlphaComponent(0.96)
 
     static func font(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont(name: fontName, size: size) ?? .systemFont(ofSize: size, weight: weight)
@@ -68,7 +70,7 @@ final class AppBackgroundView: NSView {
     }
 }
 
-final class GlassPanelView: NSView {
+class GlassPanelView: NSView {
     var cornerRadius: CGFloat = 16
     var fillColor: NSColor = ShelfStyle.panel
 
@@ -134,7 +136,7 @@ final class StyledButton: NSButton {
         isBordered = false
         bezelStyle = .regularSquare
         font = ShelfStyle.bold(size: 10)
-        contentTintColor = variant == .secondary ? ShelfStyle.body : .white
+        contentTintColor = ShelfStyle.buttonText
         wantsLayer = true
         setButtonType(.momentaryPushIn)
         translatesAutoresizingMaskIntoConstraints = false
@@ -152,20 +154,24 @@ final class StyledButton: NSButton {
         layer?.masksToBounds = false
         switch variant {
         case .primary:
-            layer?.backgroundColor = ShelfStyle.navy.withAlphaComponent(disabledAlpha).cgColor
-            contentTintColor = .white
+            layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
+            layer?.borderColor = ShelfStyle.navy.withAlphaComponent(disabledAlpha).cgColor
+            layer?.borderWidth = 1.5
+            contentTintColor = ShelfStyle.navy.withAlphaComponent(disabledAlpha)
         case .secondary:
-            layer?.backgroundColor = ShelfStyle.slateButton.withAlphaComponent(disabledAlpha).cgColor
-            layer?.borderColor = NSColor(hex: 0x334155, alpha: disabledAlpha).cgColor
+            layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
+            layer?.borderColor = NSColor(hex: 0xcbd5e1, alpha: disabledAlpha).cgColor
             layer?.borderWidth = 1
-            contentTintColor = ShelfStyle.body.withAlphaComponent(disabledAlpha)
+            contentTintColor = ShelfStyle.buttonText.withAlphaComponent(disabledAlpha)
         case .pill:
-            layer?.backgroundColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha).cgColor
+            layer?.backgroundColor = ShelfStyle.whiteButton.withAlphaComponent(disabledAlpha).cgColor
+            layer?.borderColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha).cgColor
+            layer?.borderWidth = 1.5
             layer?.shadowColor = NSColor.black.cgColor
             layer?.shadowOpacity = isEnabled ? 0.18 : 0
             layer?.shadowRadius = 2
             layer?.shadowOffset = CGSize(width: 0, height: -1)
-            contentTintColor = .white
+            contentTintColor = ShelfStyle.navy2.withAlphaComponent(disabledAlpha)
         }
     }
 
@@ -179,10 +185,10 @@ final class StyledPopupButton: NSPopUpButton {
         super.init(frame: .zero, pullsDown: false)
         isBordered = false
         font = ShelfStyle.bold(size: 10)
-        contentTintColor = ShelfStyle.heading
+        contentTintColor = ShelfStyle.buttonText
         wantsLayer = true
-        layer?.backgroundColor = ShelfStyle.slateButton.cgColor
-        layer?.borderColor = NSColor(hex: 0x334155, alpha: 0.9).cgColor
+        layer?.backgroundColor = ShelfStyle.whiteButton.cgColor
+        layer?.borderColor = NSColor(hex: 0xcbd5e1, alpha: 0.9).cgColor
         layer?.borderWidth = 1
         layer?.cornerRadius = 10
         translatesAutoresizingMaskIntoConstraints = false
