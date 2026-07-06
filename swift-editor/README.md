@@ -35,3 +35,7 @@ Current slice:
 Next slices expand the Metal surface from single-composition presentation into a
 full multi-track compositor with transforms, opacity, text overlays, masks,
 chroma/color effects, native export, and AI integration.
+
+See `LAYOUT_PLAN.md` for the planned dark editor workspace layout, including the
+left library/tools panel, center Metal preview, blue selected-element inspector,
+red AI assist panel, and bottom timeline.
