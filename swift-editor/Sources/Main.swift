@@ -3,6 +3,7 @@ import AVFoundation
 import CoreMedia
 import Darwin
 import QuartzCore
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate {
@@ -56,7 +57,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func buildWindow() {
         playerSurface = MetalVideoSurface(player: player)
         toolShelfView = ToolShelfView()
+        toolShelfView.onAction = { [weak self] action in
+            self?.handleToolAction(action)
+        }
         inspectorPanelView = InspectorPanelView()
+        inspectorPanelView.onPropertyEdit = { [weak self] property, value in
+            self?.applyInspectorEdit(property: property, value: value)
+        }
         homeView = HomeView()
         homeView.onOpenProject = { [weak self] id in
             self?.loadProject(id: id)
@@ -326,6 +333,179 @@ final class AppController: NSObject, NSApplicationDelegate {
             selection: selectedElementId.flatMap { loadedProject.timeline.element(withId: $0) },
             media: loadedProject.media
         )
+    }
+
+    private func handleToolAction(_ action: ToolShelfAction) {
+        switch action {
+        case .importLocal:
+            importLocalMedia()
+        case .importURL:
+            statusLabel.stringValue = "URL import is queued for the downloader slice."
+        case .importProjectRender:
+            statusLabel.stringValue = "Other-project import will reuse exported/final project media in the next data slice."
+        case .addText:
+            addTextClip(text: "New text", duration: 3)
+        case .recognizeSelectedAudio:
+            addVoiceRecognitionPlaceholder()
+        }
+    }
+
+    private func importLocalMedia() {
+        guard let loadedProject else {
+            statusLabel.stringValue = "Open a project before importing media."
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "Import media"
+        panel.allowedContentTypes = [.movie, .video, .audio, .mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+
+        Task { @MainActor in
+            var imported = 0
+            for url in panel.urls {
+                do {
+                    let asset = try await mediaAsset(from: url, projectId: loadedProject.summary.id)
+                    let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init)
+                    try database.insertMediaAsset(asset, sizeBytes: size ?? nil)
+                    appendImportedAsset(asset)
+                    imported += 1
+                } catch {
+                    statusLabel.stringValue = "Import failed: \(error.localizedDescription)"
+                }
+            }
+            if imported > 0 {
+                statusLabel.stringValue = "Imported \(imported) media asset\(imported == 1 ? "" : "s")."
+            }
+        }
+    }
+
+    private func mediaAsset(from url: URL, projectId: String) async throws -> MediaAsset {
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration).seconds
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let kind = videoTracks.isEmpty && !audioTracks.isEmpty ? "audio" : "video"
+        let size = try await videoTracks.first?.load(.naturalSize) ?? .zero
+        return MediaAsset(
+            id: "med_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))",
+            projectId: projectId,
+            type: kind,
+            originalFilename: url.lastPathComponent,
+            localPath: url.path,
+            duration: duration.isFinite ? duration : 0,
+            width: max(0, Int(abs(size.width))),
+            height: max(0, Int(abs(size.height))),
+            thumbnailPath: nil
+        )
+    }
+
+    private func appendImportedAsset(_ asset: MediaAsset) {
+        guard var project = loadedProject else { return }
+        project.media[asset.id] = asset
+        pushUndoSnapshot()
+        let start = max(project.timeline.duration, timelineView.currentTime)
+        if asset.type == "audio" {
+            project.timeline.appendElement(
+                TimelineElement(
+                    id: "clip_a_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10))",
+                    type: .audio,
+                    mediaId: asset.id,
+                    sourceStart: 0,
+                    sourceEnd: max(0.1, asset.duration),
+                    timelineStart: start,
+                    volume: 1
+                ),
+                toKind: .audio
+            )
+        } else {
+            project.timeline.appendElement(
+                TimelineElement(
+                    id: "clip_v_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10))",
+                    type: .video,
+                    mediaId: asset.id,
+                    sourceStart: 0,
+                    sourceEnd: max(0.1, asset.duration),
+                    timelineStart: start,
+                    speed: 1
+                ),
+                toKind: .video
+            )
+        }
+        loadedProject = project
+        toolShelfView.update(media: Array(project.media.values))
+        afterTimelineMutation(save: true, rebuild: true)
+    }
+
+    private func addTextClip(text: String, duration: Double) {
+        guard var project = loadedProject else {
+            statusLabel.stringValue = "Open a project before adding text."
+            return
+        }
+        pushUndoSnapshot()
+        let start = timelineView.currentTime
+        let clip = TimelineElement(
+            id: "clip_t_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10))",
+            type: .text,
+            timelineStart: start,
+            timelineEnd: start + max(0.5, duration),
+            text: text,
+            transform: Transform(scale: 1, x: 0, y: 0, rotation: 0)
+        )
+        project.timeline.appendElement(clip, toKind: .text)
+        loadedProject = project
+        selectedElementId = clip.id
+        timelineView.selectedElementId = clip.id
+        afterTimelineMutation(save: true, rebuild: true)
+        statusLabel.stringValue = "Added text clip."
+    }
+
+    private func addVoiceRecognitionPlaceholder() {
+        guard var project = loadedProject else {
+            statusLabel.stringValue = "Open a project before voice recognition."
+            return
+        }
+        guard let id = selectedElementId, let selected = project.timeline.element(withId: id), selected.type == .audio else {
+            statusLabel.stringValue = "Select an audio clip before voice recognition."
+            return
+        }
+        pushUndoSnapshot()
+        let clip = TimelineElement(
+            id: "clip_t_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10))",
+            type: .text,
+            timelineStart: selected.timelineStart,
+            timelineEnd: selected.end,
+            text: "Recognized speech placeholder",
+            transform: Transform(scale: 1, x: 0, y: 0, rotation: 0)
+        )
+        project.timeline.appendElement(clip, toKind: .text)
+        loadedProject = project
+        selectedElementId = clip.id
+        timelineView.selectedElementId = clip.id
+        afterTimelineMutation(save: true, rebuild: true)
+        statusLabel.stringValue = "Added placeholder caption from selected audio."
+    }
+
+    private func applyInspectorEdit(property: InspectorProperty, value: Double) {
+        guard var project = loadedProject, let selectedElementId else { return }
+        pushUndoSnapshot()
+        let changed = project.timeline.updateElement(withId: selectedElementId) { clip in
+            switch property {
+            case .speed:
+                clip.speed = clamped(value, 0.1, 16)
+            case .amplification:
+                clip.volume = clamped(value / 100, 0, 4)
+            case .size:
+                var transform = clip.transform ?? Transform()
+                transform.scale = clamped(value / 100, 0.01, 20)
+                clip.transform = transform
+            }
+        }
+        guard changed else { return }
+        loadedProject = project
+        afterTimelineMutation(save: true, rebuild: true)
+        statusLabel.stringValue = "Updated \(selectedElementId.shortStableId)."
     }
 
     private func installTimeObserver() {

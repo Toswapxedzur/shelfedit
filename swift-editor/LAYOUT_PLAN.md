@@ -1,16 +1,19 @@
 # ShelfEdit Swift Layout Plan
 
 This extends the native Swift rewrite plan with the target editor layout and
-visual hierarchy. The reference style is the user's darker Adamancia Vault UI:
-rounded panels, compact Arial typography, soft shadows, muted dark-gray
-backgrounds, and colored accent sections. The editor reference gives the
-functional layout: asset/tools panel on the left, preview in the middle,
-properties on the right, and timeline across the bottom.
+visual hierarchy. The reference style is the user's soft-precision UI adapted
+onto a dark grey app canvas: rounded panels, compact Arial typography, soft
+shadows, white top-level boxes, and off-white or semantic child boxes. The
+editor reference gives the functional layout: asset/tools panel on the left,
+preview in the middle, properties on the right, and timeline across the bottom.
 
 ## Design Principles
 
-- The main/home screen uses a grey/light-blue canvas with white floating boxes.
+- The main/home screen uses a dark grey canvas with white floating top-level
+  boxes and light-blue/white project-entry language inside the boxes.
 - The editor may keep dark media surfaces only where video preview requires it.
+- Parent and child boxes should not share the same fill color. White parent
+  boxes use off-white, light grey, or semantic-light children.
 - UI should feel custom, not stock AppKit or SwiftUI.
 - Keep the Apple-native video path untouched: `AVFoundation` ->
   `AVPlayerItemVideoOutput` / CoreVideo -> Metal preview.
@@ -18,10 +21,14 @@ properties on the right, and timeline across the bottom.
   compact typography.
 - Do not use thin borders for separation.
 - Use colored accent stripes/panels to communicate area purpose:
-  - blue/cyan = selected/current element data and timeline selection context
-  - white = AI assist, with gold fallback only when white conflicts
-  - slate/neutral = library/tools/navigation
-  - green/teal = timeline/audio/playback state where useful
+  - light blue = assets
+  - blue = video and selected/current element data
+  - pink = audio
+  - cyan = text tools and text clips
+  - gold = export and AI fallback when white conflicts
+  - white = AI assist where it does not conflict with the parent
+  - slate/neutral = generic tools/navigation
+  - red = dangerous actions only
 
 ## Main App Structure
 
@@ -88,7 +95,7 @@ Sections:
   - select
   - trim
   - split
-  - text
+  - text/cyan
   - captions
   - effects
   - templates
@@ -131,8 +138,8 @@ Recommended width: 300-380px.
 
 This panel has two major zones:
 
-1. Blue/cyan current-element data
-2. Red/rose AI assist section
+1. Blue current-element data
+2. White/gold AI assist section
 
 #### Blue: Current Element Inspector
 
@@ -169,7 +176,7 @@ Visual style:
 - Compact fields and sliders.
 - Use disabled states when no element is selected.
 
-#### Red: AI Assist
+#### White/Gold: AI Assist
 
 The red area is an AI command/proposal panel, not a general chat box first.
 
@@ -196,12 +203,13 @@ Rules:
 - AI never mutates media files directly.
 - AI proposes typed timeline commands.
 - Applying AI edits uses the same undoable command path as manual edits.
-- Red accent means "assistant/proposal/needs review", not necessarily danger.
+- AI uses white where it has contrast, or the gold fallback when white would
+  collide with a white parent box. Red remains reserved for dangerous actions.
 
 Visual style:
 
-- Rose/red accent stripe.
-- Proposal cards are dark with red-tinted headers.
+- White or gold fallback section surface.
+- Proposal cards may be white inside a gold fallback section.
 - Apply is primary blue; reject/dismiss is secondary slate; destructive proposals
   use red.
 
@@ -232,7 +240,7 @@ Structure:
   - selected clip outline uses cyan/blue
   - audio clips can show waveform later
   - video clips can show thumbnails later
-  - text clips use distinct purple/rose tint
+  - text clips use cyan tint
 - Playhead:
   - bright vertical line
   - top handle
@@ -263,8 +271,8 @@ At narrower widths:
   timeline.
 - Keep current playback/edit behavior working.
 - Add placeholder inspector and AI sections with correct colors and labels.
-- Use white/light buttons and chips inside darker or grey workspaces for
-  contrast.
+- Use white/light buttons and chips where the parent is dark or semantic; inside
+  white parents, use off-white/generic or semantic-light child fills.
 - Home has a thin settings rail on the left and a broad video/project entry grid
   on the right, ending with an empty create tile.
 
@@ -277,7 +285,7 @@ At narrower widths:
 
 ### Phase L3: AI Assist Surface
 
-- Add red AI assist section.
+- Add white/gold AI assist section.
 - Show prompt input and proposal card placeholders.
 - Wire proposal cards to typed timeline commands.
 - Use existing backend/OpenAI flow only after manual edit command path is stable.
@@ -301,7 +309,7 @@ At narrower widths:
 - Opening a project enters the editor workspace with left/center/right/bottom
   regions visible.
 - The preview remains Metal-backed and scrub performance remains smooth.
-- The right panel clearly separates blue selected-element data from red AI assist.
+- The right panel clearly separates blue selected-element data from white/gold AI assist.
 - Selecting a timeline clip updates the blue inspector.
 - AI proposal UI is visibly separate and cannot directly mutate media.
 - Existing project timeline JSON still loads and saves without migration.

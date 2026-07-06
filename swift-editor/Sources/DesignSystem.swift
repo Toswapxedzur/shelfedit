@@ -6,7 +6,9 @@ enum ShelfStyle {
     static let text = NSColor(hex: 0x1f2937)
     static let body = NSColor(hex: 0x475569)
     static let muted = NSColor(hex: 0x94a3b8)
-    static let canvas = NSColor(hex: 0xe5e7eb)
+    static let canvas = NSColor(hex: 0x202020)
+    static let secondaryCanvas = NSColor(hex: 0x2b2b2b)
+    static let childPanel = NSColor(hex: 0xf8fafc)
     static let panel = NSColor.white
     static let panelStrong = NSColor.white
     static let darkMedia = NSColor(hex: 0x111827)
@@ -71,13 +73,13 @@ final class AppBackgroundView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let gradient = NSGradient(colors: [ShelfStyle.canvas, NSColor(hex: 0xdbeafe)])
+        let gradient = NSGradient(colors: [ShelfStyle.canvas, ShelfStyle.secondaryCanvas])
         gradient?.draw(in: bounds, angle: -90)
         drawDotGrid()
     }
 
     private func drawDotGrid() {
-        NSColor(hex: 0x94a3b8, alpha: 0.24).setFill()
+        NSColor(hex: 0x94a3b8, alpha: 0.10).setFill()
         let spacing: CGFloat = 22
         var y: CGFloat = 10
         while y < bounds.height {
@@ -101,9 +103,9 @@ class GlassPanelView: NSView {
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = false
         layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
-        layer?.shadowOpacity = 0.10
-        layer?.shadowRadius = 18
-        layer?.shadowOffset = CGSize(width: 0, height: -8)
+        layer?.shadowOpacity = 0.22
+        layer?.shadowRadius = 22
+        layer?.shadowOffset = CGSize(width: 0, height: -10)
     }
 
     required init?(coder: NSCoder) {
@@ -234,7 +236,7 @@ final class AccentPanelView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 12
-        layer?.backgroundColor = NSColor.white.cgColor
+        layer?.backgroundColor = ShelfStyle.childPanel.cgColor
         layer?.shadowColor = NSColor(hex: 0x0f172a).cgColor
         layer?.shadowOpacity = 0.08
         layer?.shadowRadius = 10

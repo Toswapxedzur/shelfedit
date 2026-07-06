@@ -362,7 +362,7 @@ struct TimelineData: Codable {
 
 struct LoadedProject {
     let summary: ProjectSummary
-    let media: [String: MediaAsset]
+    var media: [String: MediaAsset]
     var timeline: TimelineData
 }
 
