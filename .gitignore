@@ -35,3 +35,6 @@ backend/app/webui/
 # Rust (native rewrite)
 native/target/
 target/
+
+# Media / raw footage
+*.mov
