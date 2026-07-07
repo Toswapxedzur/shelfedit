@@ -6,7 +6,7 @@ import QuartzCore
 import UniformTypeIdentifiers
 
 @MainActor
-final class AppController: NSObject, NSApplicationDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let database = ShelfDatabase()
 
     private var window: NSWindow!
@@ -55,6 +55,14 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if homeView?.isHidden == true {
+            resizeWindowForEditor()
+        } else {
+            resizeWindowForHome()
+        }
     }
 
     private func buildWindow() {
@@ -226,12 +234,16 @@ final class AppController: NSObject, NSApplicationDelegate {
             timelineView.bottomAnchor.constraint(equalTo: timelinePanel.bottomAnchor, constant: -12),
         ])
 
+        let screenFrame = currentVisibleScreenFrame()
         window = NSWindow(
-            contentRect: NSRect(x: 110, y: 90, width: 1320, height: 820),
+            contentRect: homeWindowFrame(in: screenFrame),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        window.minSize = minimumWindowSize(for: screenFrame)
+        window.collectionBehavior = [.fullScreenPrimary]
+        window.delegate = self
         window.title = "ShelfEdit Swift Native"
         window.contentView = content
         window.makeKeyAndOrderFront(nil)
@@ -241,6 +253,54 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func makeButton(_ title: String, _ action: Selector, variant: StyledButton.Variant = .secondary) -> NSButton {
         StyledButton(title: title, variant: variant, target: self, action: action)
+    }
+
+    private func currentVisibleScreenFrame() -> NSRect {
+        window?.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    private func homeWindowFrame(in visibleFrame: NSRect) -> NSRect {
+        let width = min(visibleFrame.width - 32, max(720, visibleFrame.width * 0.72))
+        let height = min(visibleFrame.height - 32, max(520, visibleFrame.height * 0.72))
+        return centeredFrame(width: width, height: height, in: visibleFrame)
+    }
+
+    private func editorWindowFrame(in visibleFrame: NSRect) -> NSRect {
+        visibleFrame.insetBy(dx: 8, dy: 8)
+    }
+
+    private func centeredFrame(width: CGFloat, height: CGFloat, in visibleFrame: NSRect) -> NSRect {
+        let clampedWidth = min(max(320, width), visibleFrame.width)
+        let clampedHeight = min(max(320, height), visibleFrame.height)
+        return NSRect(
+            x: visibleFrame.midX - clampedWidth / 2,
+            y: visibleFrame.midY - clampedHeight / 2,
+            width: clampedWidth,
+            height: clampedHeight
+        )
+    }
+
+    private func minimumWindowSize(for visibleFrame: NSRect) -> NSSize {
+        let availableWidth = max(320, visibleFrame.width - 32)
+        let availableHeight = max(320, visibleFrame.height - 32)
+        return NSSize(
+            width: min(availableWidth, max(760, min(1180, availableWidth))),
+            height: min(availableHeight, max(520, min(720, availableHeight)))
+        )
+    }
+
+    private func resizeWindowForHome() {
+        guard window.styleMask.contains(.fullScreen) == false else { return }
+        window.setFrame(homeWindowFrame(in: currentVisibleScreenFrame()), display: true, animate: true)
+    }
+
+    private func resizeWindowForEditor() {
+        guard window.styleMask.contains(.fullScreen) == false else { return }
+        let screenFrame = currentVisibleScreenFrame()
+        window.minSize = minimumWindowSize(for: screenFrame)
+        window.setFrame(editorWindowFrame(in: screenFrame), display: true, animate: true)
     }
 
     private func makeTimelineToolStrip(views: [NSView]) -> NSView {
@@ -285,6 +345,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         player.pause()
         playButton.title = "Play"
         setEditorVisible(false)
+        resizeWindowForHome()
         window.title = "ShelfEdit"
         statusLabel.stringValue = "Choose a project from Home."
     }
@@ -312,6 +373,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             redoStack.removeAll()
             applyTimelineToView()
             setEditorVisible(true)
+            resizeWindowForEditor()
             window.title = "ShelfEdit Swift Native - \(project.summary.name)"
             statusLabel.stringValue = "Loaded \(project.summary.name)"
             Task { await rebuildPlayer(keepTime: 0, preservePlayback: false) }
