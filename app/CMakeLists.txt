@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 
 # Qt: Widgets for the native shell + preview surface; WebEngineWidgets hosts the
 # HTML timeline/controls; WebChannel is the JS <-> C++ bridge.
-find_package(Qt6 REQUIRED COMPONENTS Widgets WebEngineWidgets WebChannel)
+find_package(Qt6 REQUIRED COMPONENTS Widgets WebEngineWidgets WebChannel Sql)
 
 # MLT (the video engine) via pkg-config. Homebrew ships mlt++-7.pc.
 find_package(PkgConfig REQUIRED)
@@ -21,6 +21,8 @@ add_executable(shelfedit
     src/VideoWidget.cpp
     src/Bridge.h
     src/Bridge.cpp
+    src/Timeline.h
+    src/Timeline.cpp
     src/MainWindow.h
     src/MainWindow.cpp
 )
@@ -29,6 +31,7 @@ target_link_libraries(shelfedit PRIVATE
     Qt6::Widgets
     Qt6::WebEngineWidgets
     Qt6::WebChannel
+    Qt6::Sql
     PkgConfig::MLT
 )
 

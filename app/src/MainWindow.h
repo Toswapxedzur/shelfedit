@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QString>
 
+#include "Timeline.h"
+
 class VideoWidget;
 class MltController;
 class Bridge;
@@ -19,6 +21,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
 
     bool load(const QString &path);
+    bool loadProject(const ProjectData &project);
 
 private:
     VideoWidget *m_video = nullptr;
