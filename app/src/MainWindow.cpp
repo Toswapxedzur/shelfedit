@@ -72,3 +72,13 @@ bool MainWindow::load(const QString &path)
     setWindowTitle(QString("ShelfEdit — %1").arg(path.section('/', -1)));
     return true;
 }
+
+bool MainWindow::loadProject(const ProjectData &project)
+{
+    if (!project.valid || !m_controller->openProject(project)) {
+        return false;
+    }
+    m_bridge->setProject(project);
+    setWindowTitle(QString("ShelfEdit — %1").arg(project.name));
+    return true;
+}
