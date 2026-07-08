@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Adamancia × shelfedit — style reference</title>
+<style>
+  /* ============================================================
+     Reference implementation of docs/adamancia-style.md
+     Dark shelfedit shell; cards & buttons from one shared
+     5-color × 3-variant palette, each with a NEON glow shadow
+     in its own family color. blue = read from the app screenshot.
+     ============================================================ */
+  :root {
+    --bg: #15171b; --panel: #20232a; --panel-2: #252932;
+    --text: #eceff5; --muted: #9299aa; --accent: #4c8dff;
+
+    --r-md: 10px; --r-lg: 12px; --r-xl: 16px;
+    --ring-hairline: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    --focus-ring: inset 0 0 0 1px var(--accent), 0 0 0 3px rgba(76, 141, 255, 0.30);
+
+    /* Palette: fill + ink. All 3 tiers are real AdamanciaVault tokens
+       (light=-100, mid=-200/-300, dark=-700). light & mid share one ink. */
+    --red-light:#fee2e2;  --red-mid:#fecaca;  --red-dark:#b91c1c;
+    --red-light-ink:#991b1b; --red-mid-ink:#991b1b; --red-dark-ink:#ffffff;
+
+    --gold-light:#fef3c7; --gold-mid:#fde68a; --gold-dark:#ca8a04;
+    --gold-light-ink:#a16207; --gold-mid-ink:#a16207; --gold-dark-ink:#ffffff;
+
+    --pink-light:#fce7f3; --pink-mid:#fbcfe8; --pink-dark:#be185d;
+    --pink-light-ink:#9d174d; --pink-mid-ink:#9d174d; --pink-dark-ink:#ffffff;
+
+    --cyan-light:#cffafe; --cyan-mid:#a5f3fc; --cyan-dark:#0e7490;
+    --cyan-light-ink:#155e75; --cyan-mid-ink:#155e75; --cyan-dark-ink:#ffffff;
+
+    --blue-light:#e9eefc; --blue-mid:#c7d2fe; --blue-dark:#1e3a8a;  /* app-derived; mid = navy-300 */
+    --blue-light-ink:#1e3a8a; --blue-mid-ink:#1e3a8a; --blue-dark-ink:#ffffff;
+
+    /* Neon glow tone per family: vivid ACCENT, not a fill tier */
+    --red-glow:#ef4444; --gold-glow:#f0b429; --pink-glow:#ec4899;
+    --cyan-glow:#06b6d4; --blue-glow:#2563eb;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px; line-height: 1.4;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  h2 { font-size: 16px; font-weight: 700; margin: 0 0 14px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+
+  .a-panel {
+    background: var(--panel); border: none; border-radius: var(--r-xl);
+    padding: 18px; color: var(--text); box-shadow: var(--ring-hairline);
+    margin-bottom: 22px;
+  }
+
+  /* ---- Cards (neon glow) ---- */
+  .a-card {
+    --fill: var(--blue-light); --ink: var(--blue-light-ink);
+    --stripe: var(--blue-dark); --glow: var(--blue-glow);
+    border: none; border-radius: var(--r-lg);
+    padding: 10px 12px; text-align: left; cursor: pointer;
+    background: var(--fill); color: var(--ink);
+    box-shadow:
+      inset 4px 0 0 var(--stripe),
+      0 3px 12px color-mix(in srgb, var(--glow) 55%, transparent),
+      0 0 24px   color-mix(in srgb, var(--glow) 30%, transparent);
+    transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+  .a-card:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 4px 0 0 var(--stripe),
+      0 4px 16px color-mix(in srgb, var(--glow) 68%, transparent),
+      0 0 30px   color-mix(in srgb, var(--glow) 42%, transparent);
+  }
+  .a-card .title { font-weight: 700; }
+  .a-card .meta { font-size: 11px; font-weight: 600; opacity: 0.75; margin-top: 2px; }
+  .a-card.red {--stripe:var(--red-dark); --glow:var(--red-glow);}
+  .a-card.gold{--stripe:var(--gold-dark);--glow:var(--gold-glow);}
+  .a-card.pink{--stripe:var(--pink-dark);--glow:var(--pink-glow);}
+  .a-card.cyan{--stripe:var(--cyan-dark);--glow:var(--cyan-glow);}
+  .a-card.blue{--stripe:var(--blue-dark);--glow:var(--blue-glow);}
+  /* Cards: only light/dark tiers. light's stripe = family MID (rim).
+     dark's stripe = the fill mixed with black — a subtle deeper edge. */
+  .a-card.red.light{--fill:var(--red-light);--ink:var(--red-light-ink);--stripe:var(--red-mid);}
+  .a-card.red.dark{--fill:var(--red-dark);--ink:var(--red-dark-ink);--stripe:color-mix(in srgb, var(--red-dark) 80%, black);}
+  .a-card.gold.light{--fill:var(--gold-light);--ink:var(--gold-light-ink);--stripe:var(--gold-mid);}
+  .a-card.gold.dark{--fill:var(--gold-dark);--ink:var(--gold-dark-ink);--stripe:color-mix(in srgb, var(--gold-dark) 80%, black);}
+  .a-card.pink.light{--fill:var(--pink-light);--ink:var(--pink-light-ink);--stripe:var(--pink-mid);}
+  .a-card.pink.dark{--fill:var(--pink-dark);--ink:var(--pink-dark-ink);--stripe:color-mix(in srgb, var(--pink-dark) 80%, black);}
+  .a-card.cyan.light{--fill:var(--cyan-light);--ink:var(--cyan-light-ink);--stripe:var(--cyan-mid);}
+  .a-card.cyan.dark{--fill:var(--cyan-dark);--ink:var(--cyan-dark-ink);--stripe:color-mix(in srgb, var(--cyan-dark) 80%, black);}
+  .a-card.blue.light{--fill:var(--blue-light);--ink:var(--blue-light-ink);--stripe:var(--blue-mid);}
+  .a-card.blue.dark{--fill:var(--blue-dark);--ink:var(--blue-dark-ink);--stripe:color-mix(in srgb, var(--blue-dark) 80%, black);}
+
+  /* ---- Buttons (neon glow) ---- */
+  .a-btn {
+    --fill: var(--blue-light); --ink: var(--blue-light-ink); --glow: var(--blue-glow);
+    border: none; border-radius: var(--r-md); padding: 7px 14px;
+    font-weight: 700; font-size: 13px; cursor: pointer;
+    background: var(--fill); color: var(--ink);
+    box-shadow:
+      0 2px 8px color-mix(in srgb, var(--glow) 55%, transparent),
+      0 0 16px  color-mix(in srgb, var(--glow) 30%, transparent);
+    transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+  }
+  .a-btn:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 12px color-mix(in srgb, var(--glow) 70%, transparent),
+      0 0 22px   color-mix(in srgb, var(--glow) 45%, transparent);
+    filter: brightness(1.03);
+  }
+  .a-btn:active { transform: translateY(0); box-shadow: 0 2px 8px color-mix(in srgb, var(--glow) 55%, transparent); }
+  .a-btn.red {--glow:var(--red-glow);}  .a-btn.gold{--glow:var(--gold-glow);}
+  .a-btn.pink{--glow:var(--pink-glow);} .a-btn.cyan{--glow:var(--cyan-glow);}
+  .a-btn.blue{--glow:var(--blue-glow);}
+  .a-btn.red.light{--fill:var(--red-light);--ink:var(--red-light-ink);}
+  .a-btn.red.mid {--fill:var(--red-mid); --ink:var(--red-mid-ink);}
+  .a-btn.red.dark{--fill:var(--red-dark);--ink:var(--red-dark-ink);}
+  .a-btn.gold.light{--fill:var(--gold-light);--ink:var(--gold-light-ink);}
+  .a-btn.gold.mid {--fill:var(--gold-mid); --ink:var(--gold-mid-ink);}
+  .a-btn.gold.dark{--fill:var(--gold-dark);--ink:var(--gold-dark-ink);}
+  .a-btn.pink.light{--fill:var(--pink-light);--ink:var(--pink-light-ink);}
+  .a-btn.pink.mid {--fill:var(--pink-mid); --ink:var(--pink-mid-ink);}
+  .a-btn.pink.dark{--fill:var(--pink-dark);--ink:var(--pink-dark-ink);}
+  .a-btn.cyan.light{--fill:var(--cyan-light);--ink:var(--cyan-light-ink);}
+  .a-btn.cyan.mid {--fill:var(--cyan-mid); --ink:var(--cyan-mid-ink);}
+  .a-btn.cyan.dark{--fill:var(--cyan-dark);--ink:var(--cyan-dark-ink);}
+  .a-btn.blue.light{--fill:var(--blue-light);--ink:var(--blue-light-ink);}
+  .a-btn.blue.mid {--fill:var(--blue-mid); --ink:var(--blue-mid-ink);}
+  .a-btn.blue.dark{--fill:var(--blue-dark);--ink:var(--blue-dark-ink);}
+
+  /* ---- Matrix layout ---- */
+  .matrix { display: grid; grid-template-columns: 56px repeat(3, 1fr); gap: 18px; align-items: center; }
+  .matrix.matrix-2col { grid-template-columns: 56px repeat(2, 1fr); }
+  .matrix .col-head { font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
+  .matrix .row-head { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+  .matrix .a-btn { width: 100%; }
+</style>
+</head>
+<body>
+  <h1>Adamancia × shelfedit</h1>
+  <p class="lead">One palette (5 colors × light / mid / dark) with <strong>neon glow shadows</strong> — each element glows in its own color. Blue is read from the app's Schedule card. Reference for <code>docs/adamancia-style.md</code>.</p>
+
+  <section class="a-panel">
+    <h2>Cards — every color × variant (light / dark only)</h2>
+    <div class="matrix matrix-2col">
+      <div></div>
+      <div class="col-head">light</div><div class="col-head">dark</div>
+
+      <div class="row-head">Red</div>
+      <div class="a-card red light"><div class="title">Red</div><div class="meta">light</div></div>
+      <div class="a-card red dark"><div class="title">Red</div><div class="meta">dark</div></div>
+
+      <div class="row-head">Gold</div>
+      <div class="a-card gold light"><div class="title">Gold</div><div class="meta">light</div></div>
+      <div class="a-card gold dark"><div class="title">Gold</div><div class="meta">dark</div></div>
+
+      <div class="row-head">Pink</div>
+      <div class="a-card pink light"><div class="title">Pink</div><div class="meta">light</div></div>
+      <div class="a-card pink dark"><div class="title">Pink</div><div class="meta">dark</div></div>
+
+      <div class="row-head">Cyan</div>
+      <div class="a-card cyan light"><div class="title">Cyan</div><div class="meta">light</div></div>
+      <div class="a-card cyan dark"><div class="title">Cyan</div><div class="meta">dark</div></div>
+
+      <div class="row-head">Blue</div>
+      <div class="a-card blue light"><div class="title">Blue</div><div class="meta">light</div></div>
+      <div class="a-card blue dark"><div class="title">Blue</div><div class="meta">dark</div></div>
+    </div>
+  </section>
+
+  <section class="a-panel">
+    <h2>Buttons — every color × variant</h2>
+    <div class="matrix">
+      <div></div>
+      <div class="col-head">light</div><div class="col-head">mid</div><div class="col-head">dark</div>
+
+      <div class="row-head">Red</div>
+      <button class="a-btn red light">Red light</button>
+      <button class="a-btn red mid">Red mid</button>
+      <button class="a-btn red dark">Red dark</button>
+
+      <div class="row-head">Gold</div>
+      <button class="a-btn gold light">Gold light</button>
+      <button class="a-btn gold mid">Gold mid</button>
+      <button class="a-btn gold dark">Gold dark</button>
+
+      <div class="row-head">Pink</div>
+      <button class="a-btn pink light">Pink light</button>
+      <button class="a-btn pink mid">Pink mid</button>
+      <button class="a-btn pink dark">Pink dark</button>
+
+      <div class="row-head">Cyan</div>
+      <button class="a-btn cyan light">Cyan light</button>
+      <button class="a-btn cyan mid">Cyan mid</button>
+      <button class="a-btn cyan dark">Cyan dark</button>
+
+      <div class="row-head">Blue</div>
+      <button class="a-btn blue light">Blue light</button>
+      <button class="a-btn blue mid">Blue mid</button>
+      <button class="a-btn blue dark">Blue dark</button>
+    </div>
+  </section>
+</body>
+</html>
