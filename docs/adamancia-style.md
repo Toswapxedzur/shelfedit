@@ -1,5 +1,10 @@
 # Adamancia design language → shelfedit
 
+> **Note:** this documents the **legacy web editor** (`legacy/app/web/`, CSS). The
+> live app is the native Swift editor — for its design system see
+> [`../swift-editor/DESIGN.md`](../swift-editor/DESIGN.md). This file remains the
+> reference for the *rationale* behind the shared Adamancia palette.
+
 Port of the **AdamanciaVault** visual language
 (`blockerGroup/macosBlocker/Sources/MacBlockerWebUI/WebAssets/popup.css`) onto
 shelfedit.
