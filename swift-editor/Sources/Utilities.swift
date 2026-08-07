@@ -17,6 +17,12 @@ func clamped<T: Comparable>(_ value: T, _ lower: T, _ upper: T) -> T {
     min(max(value, lower), upper)
 }
 
+extension ClosedRange {
+    func clamped(_ value: Bound) -> Bound {
+        Swift.min(Swift.max(value, lowerBound), upperBound)
+    }
+}
+
 func snapped(_ seconds: Double, fps: Double) -> Double {
     guard fps.isFinite && fps > 0 else { return seconds }
     return (seconds * fps).rounded() / fps

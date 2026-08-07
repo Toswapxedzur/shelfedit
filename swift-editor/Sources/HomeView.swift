@@ -34,7 +34,7 @@ final class HomeView: NSView {
         addSubview(container)
 
         let left = GlassPanelView()
-        left.fillColor = NSColor.white
+        left.fillColor = ShelfStyle.panel
         left.translatesAutoresizingMaskIntoConstraints = false
         buildLeftRail(into: left)
 
@@ -86,7 +86,7 @@ final class HomeView: NSView {
 
         let title = label("ShelfEdit", size: 18, weight: .heavy, color: ShelfStyle.heading)
         let subtitle = label("Native video workspace", size: 12, weight: .regular, color: ShelfStyle.body)
-        let button = StyledButton(title: "Open Settings", variant: .primary, target: nil, action: nil)
+        let button = AdamanciaButton(title: "Open Settings", color: .blue, tier: .dark, target: nil, action: nil)
         let stack = NSStackView(views: [title, subtitle, button])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -185,7 +185,7 @@ private final class HomeRightPanel: GlassPanelView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        fillColor = .white
+        fillColor = ShelfStyle.panel
         build()
     }
 
@@ -206,8 +206,8 @@ private final class HomeRightPanel: GlassPanelView {
     }
 
     private func build() {
-        let title = label("Projects", size: 28, weight: .heavy, color: ShelfStyle.heading)
-        let help = label("Open an existing video workspace or create a new one.", size: 13, weight: .regular, color: ShelfStyle.body)
+        let title = label("Projects", size: 28, weight: .heavy, color: ShelfStyle.onDark)
+        let help = label("Open an existing video workspace or create a new one.", size: 13, weight: .regular, color: ShelfStyle.onDarkMuted)
         let header = NSStackView(views: [title, help])
         header.orientation = .vertical
         header.alignment = .leading
@@ -275,7 +275,7 @@ private final class ProjectTileView: GlassPanelView {
         thumbnail.translatesAutoresizingMaskIntoConstraints = false
         let title = label(project.name, size: 14, weight: .bold, color: ShelfStyle.heading)
         let meta = label("\(project.mediaCount) assets | \(formatTime(project.duration))", size: 11, weight: .regular, color: ShelfStyle.body)
-        let open = StyledButton(title: "Open", variant: .primary, target: self, action: #selector(openProject))
+        let open = AdamanciaButton(title: "Open", color: .blue, tier: .dark, target: self, action: #selector(openProject))
         let stack = NSStackView(views: [thumbnail, title, meta, open])
         stack.orientation = .vertical
         stack.alignment = .leading

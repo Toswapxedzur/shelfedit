@@ -72,7 +72,8 @@ private final class MetalVideoRenderer: NSObject, MTKViewDelegate {
         nextOutput.suppressesPlayerRendering = true
         item.add(nextOutput)
         output = nextOutput
-        lastImage = nil
+        // Keep `lastImage`: the fresh item/output has no buffer for a moment, so
+        // holding the previous frame bridges the swap instead of flashing black.
     }
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -89,11 +90,20 @@ private final class MetalVideoRenderer: NSObject, MTKViewDelegate {
             let commandBuffer = commandQueue.makeCommandBuffer()
         else { return }
 
+        // The composition produces a frame for every instant — layered video,
+        // text, and black for gaps — so the surface just shows what it's handed
+        // and holds the last frame across the brief warm-up after a rebuild.
         if let image = currentFrameImage() {
             lastImage = image
         }
 
         guard let image = lastImage else {
+            // Nothing decoded yet: wipe to the clear color rather than presenting
+            // a recycled drawable, which would flash a stale frame.
+            if let passDescriptor = view.currentRenderPassDescriptor,
+               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) {
+                encoder.endEncoding()
+            }
             commandBuffer.present(drawable)
             commandBuffer.commit()
             return

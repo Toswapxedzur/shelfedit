@@ -66,6 +66,43 @@ struct ChromaKey: Codable {
     var smoothness: Double = 0.12
 }
 
+/// How a text clip is drawn. Any installed font can be named; nil means the
+/// system font. Sizes are in canvas points, so they scale with the render size.
+struct TextStyle: Codable {
+    var fontName: String?
+    var fontSize: Double
+    var bold: Bool
+    var italic: Bool
+    var colorHex: String
+    var alignment: String   // "left" | "center" | "right"
+
+    init(
+        fontName: String? = nil,
+        fontSize: Double = 48,
+        bold: Bool = true,
+        italic: Bool = false,
+        colorHex: String = "#ffffff",
+        alignment: String = "center"
+    ) {
+        self.fontName = fontName
+        self.fontSize = fontSize
+        self.bold = bold
+        self.italic = italic
+        self.colorHex = colorHex
+        self.alignment = alignment
+    }
+
+    init(from decoder: Decoder) throws {
+        let v = try decoder.container(keyedBy: CodingKeys.self)
+        fontName = try v.decodeIfPresent(String.self, forKey: .fontName)
+        fontSize = try v.decodeIfPresent(Double.self, forKey: .fontSize) ?? 48
+        bold = try v.decodeIfPresent(Bool.self, forKey: .bold) ?? true
+        italic = try v.decodeIfPresent(Bool.self, forKey: .italic) ?? false
+        colorHex = try v.decodeIfPresent(String.self, forKey: .colorHex) ?? "#ffffff"
+        alignment = try v.decodeIfPresent(String.self, forKey: .alignment) ?? "center"
+    }
+}
+
 struct Keyframe: Codable {
     var t: Double
     var opacity: Double?
@@ -100,6 +137,8 @@ struct TimelineElement: Codable, Identifiable {
     var audioFadeIn: Double?
     var audioFadeOut: Double?
     var groupId: String?
+    /// Typography for `.text` clips.
+    var style: TextStyle?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -126,6 +165,7 @@ struct TimelineElement: Codable, Identifiable {
         case audioFadeIn
         case audioFadeOut
         case groupId
+        case style
     }
 
     init(
@@ -152,7 +192,8 @@ struct TimelineElement: Codable, Identifiable {
         volume: Double? = nil,
         audioFadeIn: Double? = nil,
         audioFadeOut: Double? = nil,
-        groupId: String? = nil
+        groupId: String? = nil,
+        style: TextStyle? = nil
     ) {
         self.id = id
         self.type = type
@@ -178,6 +219,7 @@ struct TimelineElement: Codable, Identifiable {
         self.audioFadeIn = audioFadeIn
         self.audioFadeOut = audioFadeOut
         self.groupId = groupId
+        self.style = style
     }
 
     init(from decoder: Decoder) throws {
@@ -206,6 +248,7 @@ struct TimelineElement: Codable, Identifiable {
         audioFadeIn = try values.decodeIfPresent(Double.self, forKey: .audioFadeIn)
         audioFadeOut = try values.decodeIfPresent(Double.self, forKey: .audioFadeOut)
         groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
+        style = try values.decodeIfPresent(TextStyle.self, forKey: .style)
     }
 
     var duration: Double {
@@ -234,6 +277,8 @@ struct TimelineTrack: Codable, Identifiable {
     var volume: Double?
     var hidden: Bool?
     var locked: Bool?
+    /// Collapsed lanes shrink to a sliver, keeping the row addressable.
+    var collapsed: Bool?
 
     init(
         id: String,
@@ -244,7 +289,8 @@ struct TimelineTrack: Codable, Identifiable {
         muted: Bool? = nil,
         volume: Double? = nil,
         hidden: Bool? = nil,
-        locked: Bool? = nil
+        locked: Bool? = nil,
+        collapsed: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -255,6 +301,7 @@ struct TimelineTrack: Codable, Identifiable {
         self.volume = volume
         self.hidden = hidden
         self.locked = locked
+        self.collapsed = collapsed
     }
 
     enum CodingKeys: String, CodingKey {
@@ -267,6 +314,7 @@ struct TimelineTrack: Codable, Identifiable {
         case volume
         case hidden
         case locked
+        case collapsed
     }
 
     init(from decoder: Decoder) throws {
@@ -280,6 +328,7 @@ struct TimelineTrack: Codable, Identifiable {
         volume = try values.decodeIfPresent(Double.self, forKey: .volume)
         hidden = try values.decodeIfPresent(Bool.self, forKey: .hidden)
         locked = try values.decodeIfPresent(Bool.self, forKey: .locked)
+        collapsed = try values.decodeIfPresent(Bool.self, forKey: .collapsed)
     }
 }
 
@@ -357,6 +406,81 @@ struct TimelineData: Codable {
             ))
         }
         recomputeDuration()
+    }
+
+    /// After `recomputeDuration()` every track's `order` equals its array index,
+    /// so a track's array index is also its display row (0 = topmost).
+    func trackIndex(ofElementId id: String) -> Int? {
+        tracks.firstIndex { track in track.elements.contains { $0.id == id } }
+    }
+
+    /// Per-track overlap test: does anything on `trackIndex` occupy any part of
+    /// `[start, end)` (ignoring the element being moved)?
+    func hasOverlap(trackIndex: Int, start: Double, end: Double, excluding id: String) -> Bool {
+        guard tracks.indices.contains(trackIndex) else { return false }
+        return tracks[trackIndex].elements.contains { element in
+            element.id != id && start < element.end && element.timelineStart < end
+        }
+    }
+
+    /// Move an element to another track (or a brand-new track past the end) at a
+    /// new start time. Caller is responsible for validating type/overlap first.
+    mutating func moveElement(id: String, toTrackIndex targetIndex: Int, newStart: Double) {
+        guard var clip = element(withId: id) else { return }
+        _ = removeElement(withId: id)
+        clip.timelineStart = max(0, newStart)
+        if targetIndex >= tracks.count {
+            tracks.append(TimelineTrack(
+                id: "trk_\(clip.type.rawValue)_\(UUID().uuidString.prefix(8))",
+                kind: clip.type,
+                name: "\(clip.type.rawValue.capitalized) \(tracks.filter { $0.kind == clip.type }.count + 1)",
+                order: tracks.count,
+                elements: [clip]
+            ))
+        } else {
+            tracks[targetIndex].elements.append(clip)
+        }
+        recomputeDuration()
+    }
+
+    /// Every element linked to `id`, including it. A video clip and the audio
+    /// clip imported alongside it are peers on their own tracks sharing a
+    /// `groupId`; linked elements move, trim, split and delete together.
+    func linkedElementIds(of id: String) -> [String] {
+        guard let element = element(withId: id), let group = element.groupId else { return [id] }
+        let linked = tracks.flatMap(\.elements).filter { $0.groupId == group }.map(\.id)
+        return linked.isEmpty ? [id] : linked
+    }
+
+    mutating func updateTrack(id: String, _ edit: (inout TimelineTrack) -> Void) {
+        guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
+        edit(&tracks[index])
+    }
+
+    mutating func removeTrack(id: String) {
+        tracks.removeAll { $0.id == id }
+        recomputeDuration()
+    }
+
+    /// Reorder a track by a signed number of display rows (-1 = up, +1 = down),
+    /// clamped to the ends. Display order == array index after `recomputeDuration`.
+    mutating func moveTrack(id: String, by delta: Int) {
+        guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
+        let target = clamped(index + delta, 0, tracks.count - 1)
+        guard target != index else { return }
+        let track = tracks.remove(at: index)
+        tracks.insert(track, at: target)
+        recomputeDuration()
+    }
+
+    /// Timeline ranges where a non-hidden video clip is visible — used to blank
+    /// the preview surface in gaps (tracks govern what's shown).
+    func visibleVideoRanges() -> [Range<Double>] {
+        tracks
+            .filter { !($0.hidden ?? false) }
+            .flatMap(\.elements)
+            .filter { $0.type == .video }
+            .map { $0.timelineStart..<max($0.timelineStart + 0.0001, $0.end) }
     }
 }
 

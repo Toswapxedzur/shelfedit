@@ -1,5 +1,14 @@
 # ShelfEdit
 
+> **Main app: [`swift-editor/`](swift-editor/)** — the native macOS (Swift +
+> AppKit/AVFoundation/Metal) editor is the primary, actively developed app.
+> Run it with `cd swift-editor && ./run.sh`.
+>
+> Everything under [`legacy/`](legacy/) (the C++/Qt `app`, the FastAPI `backend`,
+> the React `frontend`, the Rust `native` rewrite, and `avplayer-scrub`) is
+> retired and kept for reference only. The architecture notes below describe that
+> legacy stack.
+
 A local-first AI video editor. Its signature workflow: import a video,
 transcribe the audio, let an AI propose which sections to keep vs. cut, review
 the plan, and render the final video locally. Your original footage always stays
